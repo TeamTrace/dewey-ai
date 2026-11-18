@@ -2,7 +2,7 @@
 
 Gradio chat app that answers journalists' questions from a newsroom article archive, with
 `[SRCn]` citations linked to article URLs. Forked from `phillymedia/dewey-ai` (The
-Philadelphia Inquirer); this fork adds a non-Azure stack.
+Philadelphia Inquirer); this fork adds two non-Azure stacks, one of them fully open source.
 
 ## Layout
 
@@ -13,7 +13,9 @@ Philadelphia Inquirer); this fork adds a non-Azure stack.
   3. `llm.stream_answer()` → text deltas. `[SRCn]` is rewritten to a markdown link using the n-th source's URL.
 - `app/providers/`: one implementation per vendor; interfaces are in `base.py`.
   - `DEWEY_STACK=azure` (default): `azure_openai.py` + `azure_search.py`
-  - `DEWEY_STACK=anthropic`: `anthropic_llm.py` (Claude) + `pgvector_store.py` (Voyage AI embeddings and rerank, Postgres/pgvector)
+  - `DEWEY_STACK=anthropic`: `anthropic_llm.py` (Claude) + `pgvector_store.py` (Postgres/pgvector)
+  - `DEWEY_STACK=open`: `open_llm.py` (any OpenAI-compatible server, e.g. Ollama) + `pgvector_store.py`
+  - `embeddings.py`: embedders/rerankers for the Postgres store, chosen by `EMBEDDING_PROVIDER` (`voyage` | `local`) and `RERANK_PROVIDER` (`voyage` | `local` | `none`). Defaults: `voyage` for `anthropic`, `local` for `open`. Local models need `requirements-local.txt`.
 - `app/tools/`: prompts (`load_search_prompt`, `load_answer_prompt`) and the OpenAI `search_archive` tool schema.
 - `app/models/`: config dataclasses (`NewsroomConfig` reads `NEWSROOM_NAME`, `ARCHIVE_START_DATE`, `DEFAULT_REGION`) and the Pydantic `SearchMetadata` schema used for Claude structured outputs.
 - `app/setup.py` + `app/setup/`: Azure index, skillset and indexer setup. `app/setup_postgres.py`: Postgres schema and indexing.
@@ -26,7 +28,9 @@ Philadelphia Inquirer); this fork adds a non-Azure stack.
 - All providers must return the same metadata/source shapes; `tips.py` and the citation linker depend on them.
 - The metadata step's output is model-generated: validate it before it reaches a query. Dates are checked with `date.fromisoformat`, OData strings are escaped, and SQL values are always bound parameters.
 - Claude calls use `client.beta.messages.*` because they opt into server-side refusal fallbacks (`fallbacks="default"`, beta `server-side-fallback-2026-07-01`). Check `stop_reason == "refusal"` before using output. Don't use forced `tool_choice` with current Claude models (400); use structured outputs.
-- The embedding model/dimension is fixed per index. Changing `VOYAGE_EMBED_MODEL` or `VOYAGE_EMBED_DIM` requires a fresh database and a re-index.
+- The embedding model/dimension is fixed per index and recorded in the `index_info` table; `PgVectorStore.check_index()` refuses a mismatch. Changing `EMBEDDING_PROVIDER`, `EMBED_MODEL` or `EMBED_DIM` requires a fresh database and a re-index.
+- `open_llm.py` must not assume the server enforces JSON schemas: it tries `json_schema`, falls back to `json_object`, strips `<think>` blocks and code fences, then validates with Pydantic.
+- Keep heavy local-model dependencies (torch, sentence-transformers) out of `requirements.txt`; they belong in `requirements-local.txt` and are imported lazily.
 
 ## Checks
 
@@ -37,4 +41,4 @@ ruff check app/ --select F
 python -c "import sys; sys.path.insert(0, 'app'); import dewey, providers"
 ```
 
-The `anthropic` stack can be exercised locally against a throwaway Postgres with pgvector by running `python app/setup_postgres.py` and then `python app/main.py`. This needs real `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` values.
+The Postgres stacks can be exercised locally against a throwaway Postgres with pgvector by running `python app/setup_postgres.py` and then `python app/main.py`. The `anthropic` stack needs a real `ANTHROPIC_API_KEY` (and `VOYAGE_API_KEY` unless both providers are `local`/`none`); the `open` stack needs a running model server and Hugging Face access for the first model download.

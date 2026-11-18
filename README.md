@@ -40,34 +40,87 @@ pip install -r requirements.txt
 
 ## Choosing a stack
 
-Dewey can run on two interchangeable vendor stacks, selected with `DEWEY_STACK` in `.env`:
+Dewey runs on one of three interchangeable stacks, selected with `DEWEY_STACK` in `.env`:
 
-| Step | `azure` (default) | `anthropic` |
-|---|---|---|
-| Search planning (question, dates, authors) | Azure OpenAI, forced tool call | Claude, structured outputs |
-| Cited answer | Azure OpenAI, streamed | Claude, streamed |
-| Embeddings | Azure OpenAI `text-embedding-3-large` | Voyage AI `voyage-4` |
-| Search engine | Azure AI Search (hybrid + semantic ranker) | Postgres + pgvector (keyword + vector, fused with RRF) |
-| Reranking | Azure semantic ranker | Voyage AI `rerank-3` |
-| Indexing | `app/setup.py` (Blob Storage + Azure indexer) | `app/setup_postgres.py` (runs locally) |
+| Step | `azure` (default) | `anthropic` | `open` |
+|---|---|---|---|
+| Search planning (question, dates, authors) | Azure OpenAI, forced tool call | Claude, structured outputs | Open-weight model on your own server, JSON output validated against a schema |
+| Cited answer | Azure OpenAI, streamed | Claude, streamed | Open-weight model, streamed |
+| Embeddings | Azure OpenAI `text-embedding-3-large` | Voyage AI `voyage-4` (hosted) | `voyage-4-nano` (open-weight, runs locally) |
+| Search engine | Azure AI Search (hybrid + semantic ranker) | Postgres + pgvector (keyword + vector, fused with RRF) | same as `anthropic` |
+| Reranking | Azure semantic ranker | Voyage AI `rerank-3` (hosted) | `BAAI/bge-reranker-v2-m3` (open-weight, runs locally) |
+| Indexing | `app/setup.py` (Blob Storage + Azure indexer) | `app/setup_postgres.py` (runs locally) | same as `anthropic` |
+| Paid accounts needed | Azure | Anthropic, Voyage AI | none |
 
-Anthropic does not offer an embedding model; its documentation points to Voyage AI ([Anthropic embeddings guide](https://platform.claude.com/docs/en/build-with-claude/embeddings)), so the `anthropic` stack needs a Voyage key as well as a Claude key. Indexes are **not** portable between stacks: vectors from different embedding models can't be compared, so switching stacks means re-indexing.
+On the two Postgres stacks, embeddings and reranking can be mixed and matched with `EMBEDDING_PROVIDER` (`voyage` | `local`) and `RERANK_PROVIDER` (`voyage` | `local` | `none`). For example, `DEWEY_STACK="anthropic"` with both set to `local` uses Claude for answers and no Voyage account.
+
+Anthropic does not offer an embedding model; its documentation points to Voyage AI ([Anthropic embeddings guide](https://platform.claude.com/docs/en/build-with-claude/embeddings)). Indexes are **not** portable between embedding models: vectors from different models can't be compared, so changing `EMBEDDING_PROVIDER`, `EMBED_MODEL` or `EMBED_DIM` means indexing into a fresh database. Dewey records which model built each database and refuses to search it with a different one.
+
+### Common setup for the Postgres stacks (`anthropic` and `open`)
+
+1. `DATABASE_URL`: a Postgres database with the [pgvector](https://github.com/pgvector/pgvector) extension available (self-hosted, or a managed provider that supports pgvector). pgvector 0.8+ is recommended; with older versions, very selective date/author filters can return fewer vector matches.
+2. Put your articles in `data/` (same JSON format as below) and index them with the same `.env` you'll run Dewey with:
+   ```bash
+   python app/setup_postgres.py
+   ```
+   This creates the tables and indexes, splits each article into ~380-word chunks with ~70-word overlap (an approximation of the Azure path's 512-token/96-token split), embeds them, and stores them. Re-running it updates articles in place.
+3. Launch Dewey: `python app/main.py`.
 
 ### Running on the `anthropic` stack
 
 1. Get credentials:
    - `ANTHROPIC_API_KEY`: from the Claude Console.
-   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB).
-   - `DATABASE_URL`: a Postgres database with the [pgvector](https://github.com/pgvector/pgvector) extension available (self-hosted, or a managed provider that supports pgvector). pgvector 0.8+ is recommended; with older versions, very selective date/author filters can return fewer vector matches.
-2. In `.env`, set `DEWEY_STACK="anthropic"` plus the variables in the `anthropic` section of `.env.template`. Optionally set `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION`.
-3. Put your articles in `data/` (same JSON format as below) and index them:
-   ```bash
-   python app/setup_postgres.py
-   ```
-   This creates the tables and indexes, splits each article into ~380-word chunks with ~70-word overlap (an approximation of the Azure path's 512-token/96-token split), embeds them with Voyage, and stores them. Re-running it updates articles in place.
-4. Launch Dewey as usual: `python app/main.py`.
+   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB). Not needed if you set `EMBEDDING_PROVIDER` and `RERANK_PROVIDER` to `local` or `none` (see the next section for the local setup).
+2. In `.env`, set `DEWEY_STACK="anthropic"`, `DATABASE_URL`, and the keys above. Optionally set `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION`.
+3. Follow the common setup above.
 
 Model and cost notes: both Claude steps default to `claude-opus-5-5`. The search-planning step runs at `low` effort and the answer at `medium`; override them with `ANTHROPIC_MODEL`, `ANTHROPIC_METADATA_EFFORT` and `ANTHROPIC_ANSWER_EFFORT`. Requests opt into Anthropic's server-side refusal fallback: if a safety classifier declines a request, the API retries it on a fallback model in the same call. If the whole chain declines, Dewey says so in the answer instead of failing silently.
+
+### Running fully open source (`open` stack)
+
+Every component runs on hardware you control, with no accounts or API keys:
+
+| Component | What it is | License |
+|---|---|---|
+| Chat model | Any open-weight model on an OpenAI-compatible server. Examples: [Qwen3-8B](https://hf.co/Qwen/Qwen3-8B) (8B parameters), [gpt-oss-20b](https://hf.co/openai/gpt-oss-20b) (21B parameters) | Apache 2.0 (both examples) |
+| Model server | [Ollama](https://github.com/ollama/ollama) (default), or vLLM / llama.cpp's server | MIT (Ollama) |
+| Embeddings | [voyage-4-nano](https://hf.co/MongoDB/voyage-4-nano), 347M parameters, run via the `voyageai` SDK's local mode | Apache 2.0 |
+| Reranker | [bge-reranker-v2-m3](https://hf.co/BAAI/bge-reranker-v2-m3), 568M parameters, run via sentence-transformers | Apache 2.0 |
+| Database | PostgreSQL + [pgvector](https://github.com/pgvector/pgvector) | PostgreSQL License (Postgres); see the pgvector repo |
+| Python libraries | gradio, openai (client only), voyageai, sentence-transformers, psycopg, pgvector, pydantic | Apache 2.0 / MIT / BSD, except psycopg (LGPL-3.0) |
+
+"Open-weight" means the trained model is free to download, run and modify under the license above; it does not mean the training data is published.
+
+Steps:
+
+1. **Install the local-model dependencies** on top of `requirements.txt`:
+   ```bash
+   pip install -r requirements-local.txt
+   ```
+   This installs PyTorch. On a machine without an NVIDIA GPU, installing the CPU-only PyTorch build first avoids several GB of GPU libraries:
+   ```bash
+   pip install torch --index-url https://download.pytorch.org/whl/cpu
+   pip install -r requirements-local.txt
+   ```
+2. **Run a chat model.** With [Ollama](https://ollama.com) installed:
+   ```bash
+   ollama pull qwen3:8b        # or another model; larger models need more RAM/VRAM
+   ```
+   Ollama serves an OpenAI-compatible API at `http://localhost:11434/v1`, which is Dewey's default. For another server, set `OPEN_LLM_BASE_URL` (and `OPEN_LLM_API_KEY` if it needs one).
+3. **Configure `.env`:**
+   ```bash
+   DEWEY_STACK="open"
+   OPEN_LLM_MODEL="qwen3:8b"
+   DATABASE_URL="postgresql://user:password@localhost:5432/dewey"
+   NEWSROOM_NAME="Your Newsroom"      # optional, see .env.template
+   ```
+4. **Follow the common setup above.** The first run of `app/setup_postgres.py` downloads the embedding model (and the first question downloads the reranker) from Hugging Face into `~/.cache/huggingface`. After that, everything runs offline except for reaching your own Postgres and model server.
+
+What to expect, honestly:
+- **Answer quality** depends mostly on the chat model. Small local models are more likely than Claude or GPT-class models to miss a citation, cite the wrong source, or ignore the "say you can't answer" rule. Check citations against the linked articles before relying on an answer.
+- **Search planning:** Dewey asks the server for JSON that matches a schema. If the server can't enforce schemas, Dewey falls back to plain JSON mode and validates the reply. If the reply still doesn't fit, Dewey searches the question as typed, with no date/author filters (the log says when this happens).
+- **Speed:** indexing a large archive on CPU can take hours; a GPU makes embedding much faster. Reranking adds noticeable latency per question on CPU. Set `RERANK_PROVIDER="none"` to skip it and keep the hybrid-search order.
+- Models that write their reasoning inside `<think>…</think>` tags (e.g. Qwen3) have that text removed before it reaches the journalist.
 
 ## Configuration (`azure` stack)
 

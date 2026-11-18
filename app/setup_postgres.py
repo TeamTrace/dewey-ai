@@ -1,18 +1,20 @@
 """
-Index the JSON articles in data/ into Postgres + pgvector (DEWEY_STACK=anthropic).
+Index the JSON articles in data/ into Postgres + pgvector
+(DEWEY_STACK=anthropic or DEWEY_STACK=open).
 
     python app/setup_postgres.py
 
-Requires DATABASE_URL and VOYAGE_API_KEY. Safe to re-run: articles are
-upserted by id (or by a hash of their URL when no id is given) and their
-chunks are replaced.
+Uses the same EMBEDDING_PROVIDER / EMBED_MODEL / EMBED_DIM settings as the
+app, so run it with the .env you will run Dewey with. Requires DATABASE_URL,
+plus VOYAGE_API_KEY when embeddings come from hosted Voyage AI. Safe to
+re-run: articles are upserted by id (or by a hash of their URL when no id is
+given) and their chunks are replaced.
 
 This is the counterpart of app/setup.py, which builds the Azure AI Search
 index, skillset and indexer. Here, chunking and embedding run locally in this
 script instead of inside an Azure indexer.
 """
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -53,22 +55,33 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
 
 def main() -> None:
     load_dotenv(REPO_ROOT / ".env")
-    missing = [v for v in ("DATABASE_URL", "VOYAGE_API_KEY") if not os.getenv(v, "").strip()]
-    if missing:
-        print(f"❌ Missing required environment variables: {', '.join(missing)}")
+    from providers import StackConfigError, build_pgvector_store, current_stack, retrieval_providers
+
+    try:
+        if current_stack() == "azure":
+            print("❌ DEWEY_STACK is 'azure' (or unset). This script indexes into Postgres for "
+                  "DEWEY_STACK=anthropic or open; for Azure, run app/setup.py.")
+            sys.exit(1)
+        store = build_pgvector_store()
+    except StackConfigError as e:
+        print(f"❌ {e}")
         sys.exit(1)
 
-    from providers import build_pgvector_store
-
-    store = build_pgvector_store()
+    embed_provider, rerank_provider = retrieval_providers()
+    print(f"🔧 Embeddings: {embed_provider} ({store.embedder.model}, {store.embedder.dim} dims); "
+          f"reranking: {rerank_provider}")
     print("🔧 Creating schema (extension, tables, indexes) if needed...")
-    store.create_schema()
+    try:
+        store.create_schema()
+    except Exception as e:  # IndexMismatchError and connection errors alike
+        print(f"❌ {e}")
+        sys.exit(1)
 
     documents = load_documents()
     if not documents:
         return
 
-    print(f"🔄 Chunking and embedding {len(documents)} document(s) with {store.config.embed_model}...")
+    print(f"🔄 Chunking and embedding {len(documents)} document(s) with {store.embedder.model}...")
     chunks = store.index_documents(documents)
     print(f"🎉 Indexed {len(documents)} article(s) as {chunks} chunk(s).")
 
