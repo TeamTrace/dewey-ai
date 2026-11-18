@@ -59,9 +59,10 @@ class BuildWhereTests(unittest.TestCase):
         self.assertEqual(params, {"start_date": "2024-01-01", "end_date": "2024-12-31"})
 
     def test_unparseable_dates_are_dropped(self):
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+        # The warning may go to stdout or stderr (the MCP server requires stderr: stdout is its channel).
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertEqual(build_where(meta(start="last spring", end="2024-02-30")), ("TRUE", {}))
-        self.assertIn("Ignoring unparseable start_date", out.getvalue())
+        self.assertIn("Ignoring unparseable start_date", out.getvalue() + err.getvalue())
 
     def test_authors_are_one_bound_parameter(self):
         name = "O'Brien'); DROP TABLE articles; --"
