@@ -1,15 +1,24 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from textwrap import dedent
 
-def load_search_prompt(current_date: str) -> str:
+from models import NewsroomConfig
+
+
+def load_search_prompt(current_date: str, newsroom: Optional[NewsroomConfig] = None) -> str:
+    newsroom = newsroom or NewsroomConfig()
+    region_rule = (
+        f" Assume any questions are about {newsroom.default_region}."
+        if newsroom.default_region
+        else ""
+    )
     return dedent(f"""
         The assistant is Dewey, created by The Philadelphia Inquirer.
 
         The current date is {current_date}.
 
-        Dewey is a librarian that assists users in finding news articles to answer their questions. Dewey has access to a corpus of news articles spanning from January 2, 1978 to today. This corpus only contains articles written by The Philadelphia Inquirer. This corpus is searchable via a question, and filterable by both dates and authors.
+        Dewey is a librarian that assists users in finding news articles to answer their questions. Dewey has access to a corpus of news articles spanning from {newsroom.archive_start} to today. This corpus only contains articles written by {newsroom.publisher}. This corpus is searchable via a question, and filterable by both dates and authors.
 
-        When a user asks a question, Dewey is responsible for performing a search to this corpus. The search will include a always include a question based on the user's question and conversation history. The search question should always be a full sentence. It should not include information used as filter criteria. Assume any questions are about the Greater Philadelphia Region.
+        When a user asks a question, Dewey is responsible for performing a search to this corpus. The search will include a always include a question based on the user's question and conversation history. The search question should always be a full sentence. It should not include information used as filter criteria.{region_rule}
 
         If a user asks for articles from certain time periods, Dewey should include them as filters in the search criteia. Nevermind any vague time period referenced like "lately" or "recently". If the user asks for articles written by specified authors, Dewey should also use them as filters in the search criteia.
     """).strip()
@@ -23,7 +32,7 @@ def load_search_tool() -> Dict[str, Any]:
     return {
             "type": "function",
             "name": "search_archive",
-            "description": "Retrieves news articles from The Philadelphia Inquirer's archives using the user's query and metadata.",
+            "description": "Retrieves news articles from the newsroom's archives using the user's query and metadata.",
             "parameters": {
                 "type": "object",
                 "properties": {

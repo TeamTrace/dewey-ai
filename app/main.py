@@ -1,30 +1,15 @@
 import gradio as gr
 from dotenv import load_dotenv
 from dewey import Dewey
-from models import AzureSearchConfig, AzureOpenAIConfig
-import os
+from models import NewsroomConfig
+from providers import build_stack
 import uuid
-import json
 
 load_dotenv()
 
-
-oai_config = AzureOpenAIConfig(
-    endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-    api_key=os.environ["AZURE_OPENAI_API_KEY"],
-    embedding_deployment=os.environ["EMBEDDING_DEPLOYMENT_NAME"],
-    embedding_model=os.environ["EMBEDDING_MODEL_NAME"],
-    chat_deployment=os.environ["CHATGPT_DEPLOYMENT_NAME"],
-    chat_model=os.environ["CHATGPT_MODEL_NAME"]
-)
-
-search_config = AzureSearchConfig(
-    service_endpoint=os.environ["AZURE_SEARCH_ENDPOINT"],
-    index_name=os.environ["AZURE_SEARCH_INDEX_NAME"],
-    key=os.environ["AZURE_SEARCH_API_KEY"]
-)
-
-dewey = Dewey(oai_config, search_config)
+# DEWEY_STACK=azure (default) or anthropic; see providers/__init__.py
+llm, retriever = build_stack(NewsroomConfig.from_env())
+dewey = Dewey(llm, retriever)
 
 
 def chat_with_dewey(message, history, session_state):
