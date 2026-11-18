@@ -1,0 +1,43 @@
+# Lint and unit tests on every pull request and on pushes to main.
+#
+# Needs no secrets, no network beyond installing packages, and no Postgres:
+# importer tests use fake sites on 127.0.0.1, and the Postgres filter tests in
+# tests/providers/ are skipped unless DEWEY_TEST_DATABASE_URL is set.
+# pexpect is installed so the setup-wizard tests in tests/install/ run too
+# (they skip themselves without it).
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ruff pexpect==4.9.0
+
+      - name: Lint (pyflakes rules)
+        run: ruff check app/ install.py tests/ --select F
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t . -v

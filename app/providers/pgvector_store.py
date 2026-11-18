@@ -83,7 +83,8 @@ def schema_sql(embed_dim: int) -> List[str]:
         "CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv)",
         "CREATE INDEX IF NOT EXISTS chunks_article_idx ON chunks (article_id)",
-        "CREATE INDEX IF NOT EXISTS articles_authors_idx ON articles USING gin (authors)",
+        BYLINE_KEYS_SQL,
+        f"CREATE INDEX IF NOT EXISTS articles_byline_keys_idx ON articles USING gin ({BYLINE_KEYS_FUNCTION}(authors))",
         "CREATE INDEX IF NOT EXISTS articles_publish_date_idx ON articles (publish_date)",
     ]
 
@@ -116,6 +117,42 @@ def _is_iso_date(value: str) -> bool:
         return False
 
 
+# How a byline name is compared, applied in SQL to both the stored names and the
+# requested ones: runs of whitespace (including the no-break space that pasted
+# bylines often carry) become one space, the ends are trimmed, and the result is
+# lower-cased. So "jane  doe" finds "Jane Doe". An E'' string, so the backslashes
+# mean the same whatever standard_conforming_strings is set to. lower() follows
+# the database's LC_CTYPE: in a database created with the plain "C" locale only
+# A-Z are case-folded (tested: C.UTF-8 folds accented letters too).
+_NORMALIZED_NAME = "lower(btrim(regexp_replace({}, E'[\\\\s\\\\u00a0]+', ' ', 'g')))"
+# The same, over a whole byline array. IMMUTABLE so that articles can have a GIN
+# index on it: without one, an author filter can only be checked after the HNSW
+# scan has picked its nearest candidates, and a rare author's stories are lost
+# from the vector half of the search. Changing the body changes what the index
+# holds: drop and re-create articles_byline_keys_idx after any change.
+BYLINE_KEYS_FUNCTION = "dewey_byline_keys"
+BYLINE_KEYS_SQL = (
+    f"CREATE OR REPLACE FUNCTION {BYLINE_KEYS_FUNCTION}(names text[]) RETURNS text[] "
+    "LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE "
+    f"AS $$ SELECT ARRAY(SELECT {_NORMALIZED_NAME.format('n')} FROM unnest(names) AS n) $$"
+)
+AUTHOR_MATCH_SQL = f"{BYLINE_KEYS_FUNCTION}(a.authors) && {BYLINE_KEYS_FUNCTION}(%(authors)s::text[])"
+
+
+def _clean_author_names(authors: Any) -> List[str]:
+    """Requested byline names, whitespace-collapsed, without blanks or case-insensitive repeats."""
+    names, seen = [], set()
+    for author in authors or []:
+        name = author.get("name") if isinstance(author, dict) else None
+        if not isinstance(name, str):
+            continue
+        name = " ".join(name.split())  # str.split() also splits on no-break and other Unicode spaces
+        if name and name.casefold() not in seen:
+            seen.add(name.casefold())
+            names.append(name)
+    return names
+
+
 def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
     """SQL filter on `articles a`, equivalent to the Azure OData filter. Values are bound, never interpolated."""
     clauses, params = [], {}
@@ -133,10 +170,12 @@ def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         # Inclusive end date in UTC, like `le {end}T23:59:59Z` in the Azure path.
         clauses.append("a.publish_date < (%(end_date)s::date + 1)::timestamp AT TIME ZONE 'UTC'")
         params["end_date"] = date_range["end_date"]
-    authors = [a["name"] for a in metadata.get("authors") or [] if a.get("name")]
+    authors = _clean_author_names(metadata.get("authors"))
     if authors:
-        # Exact, case-sensitive match on any listed author, like `a eq '...'` in Azure.
-        clauses.append("a.authors && %(authors)s::text[]")
+        # Any listed author, ignoring case and spacing (see _NORMALIZED_NAME), through the
+        # articles_byline_keys_idx index. The Azure path's `a eq '...'` is exact; a journalist
+        # typing "jane doe" means Jane Doe.
+        clauses.append(AUTHOR_MATCH_SQL)
         params["authors"] = authors
     return (" AND ".join(clauses) if clauses else "TRUE"), params
 
@@ -218,6 +257,13 @@ class PgVectorStore:
                 f"Embedding settings don't match this database ({detail}). Either restore the "
                 "original EMBEDDING_PROVIDER/EMBED_MODEL/EMBED_DIM settings, or index into a fresh "
                 "database with `python app/setup_postgres.py`."
+            )
+        # A constant from this module, not a value: inlined because to_regprocedure takes cstring before PG 16.
+        if conn.execute(f"SELECT to_regprocedure('{BYLINE_KEYS_FUNCTION}(text[])')").fetchone()[0] is None:
+            raise IndexMismatchError(
+                f"This database has no {BYLINE_KEYS_FUNCTION}() function, which author filters use: it was "
+                "set up by an earlier version of Dewey. Run `python app/setup_postgres.py` again to add it "
+                "and its index (this also embeds the articles in data/ again)."
             )
         self._index_checked = True
 

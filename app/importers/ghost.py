@@ -1,6 +1,9 @@
 """
 Ghost Content API importer: published posts from a Ghost site.
 
+Beta: tested against sample exports only (fixtures shaped like the Content
+API's responses), not yet against a live newsroom site.
+
     export GHOST_CONTENT_API_KEY=...      # Ghost Admin > Integrations > custom integration
     python app/import_archive.py ghost --url https://www.example.com --limit 20
 
@@ -51,7 +54,8 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from importers.common import ImporterError, clean_text, http_get_json, parse_date
 
 NAME = "ghost"
-HELP = "Published posts from a Ghost site, read through its Content API (needs a Content API key)."
+HELP = ("Beta (tested against sample exports only): published posts from a Ghost site, read "
+        "through its Content API (needs a Content API key).")
 
 KEY_ENV = "GHOST_CONTENT_API_KEY"
 MAX_PER_PAGE = 100  # Ghost 6 caps limit at 100 (and turns limit=all into 100)

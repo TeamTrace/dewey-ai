@@ -13,8 +13,11 @@ installed. It:
   2. for every account or tool that choice needs, says where to get it and
      asks for the credential (secrets are typed hidden and never printed);
   3. writes .env (backing up any existing one), readable only by you;
-  4. optionally installs Python dependencies, checks the credentials and
-     services it can reach, and indexes the articles in data/.
+  4. optionally installs Python dependencies and checks the credentials and
+     services it can reach;
+  5. for the Postgres stacks, helps get the archive into data/ with one of
+     the importers in app/importers/ (a small trial run first), then
+     optionally indexes the articles in data/.
 
 Re-running it is safe: values already in .env are offered as defaults, so you
 can change one option without re-entering everything.
@@ -24,14 +27,18 @@ import getpass
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
@@ -97,9 +104,9 @@ def ask(prompt: str, default: str = "", required: bool = False) -> str:
         say("  This one is required.")
 
 
-def ask_secret(prompt: str, existing: str = "") -> str:
+def ask_secret(prompt: str, existing: str = "", kept: str = "the saved value") -> str:
     """Hidden input. Enter keeps an existing value; '-' clears it."""
-    hint = " [Enter keeps the saved value, '-' clears it]" if existing else " [Enter to skip for now]"
+    hint = f" [Enter keeps {kept}, '-' clears it]" if existing else " [Enter to skip for now]"
     try:
         value = getpass.getpass(f"{prompt}{hint}: ").strip()
     except EOFError:
@@ -121,11 +128,11 @@ def ask_yes(prompt: str, default: bool = True) -> bool:
             return False
 
 
-def choose(prompt: str, options, default: str) -> str:
+def choose(prompt: str, options, default: str, mark: str = "current") -> str:
     """options: list of (value, description)."""
     say(prompt)
     for i, (value, desc) in enumerate(options, 1):
-        marker = " (current)" if value == default else ""
+        marker = f" ({mark})" if value == default else ""
         say(f"  {i}. {value}{marker}: {desc}")
     values = [v for v, _ in options]
     while True:
@@ -487,6 +494,497 @@ def index_archive(values: dict) -> None:
         run([sys.executable, script])
 
 
+# ---------------------------------------------------------------- archive import
+
+IMPORT_SCRIPT = "app/import_archive.py"
+TRIAL_LIMIT = 20
+
+# Answers to "Where is your archive?". The first six are the importers' NAMEs
+# in app/importers/ (tests/install checks that they match).
+IMPORT_SOURCES = [
+    ("wordpress-api", "A live WordPress site, read through its REST API. Public posts need no login."),
+    ("wordpress-export", "A WordPress export file (wp-admin > Tools > Export), read offline."),
+    ("feed", "An RSS or Atom feed from any CMS. Feeds often reach back only a few pages."),
+    ("csv", "A CSV file (from a spreadsheet, a database or a CMS), one row per article."),
+    ("drupal", "A Drupal 8.7+ site, through its JSON:API module. "
+               "Beta: tested against sample exports only."),
+    ("ghost", "A Ghost site, through its Content API (needs a Content API key). "
+              "Beta: tested against sample exports only."),
+    ("json", "I already have article JSON files in data/."),
+    ("skip", "Skip this for now."),
+]
+
+# Environment variables the importers read logins and keys from (USER_ENV,
+# PASSWORD_ENV and KEY_ENV in app/importers/wordpress_api.py, drupal.py and
+# ghost.py; tests/install checks that they match). Secrets reach the importer
+# only this way: command-line flags show up in the process list and in shell
+# history, and the commands below are printed.
+IMPORTER_ENV = {
+    "wordpress-api": ("WORDPRESS_USER", "WORDPRESS_APP_PASSWORD"),
+    "drupal": ("DRUPAL_USER", "DRUPAL_PASSWORD"),
+    "ghost": ("GHOST_CONTENT_API_KEY",),
+}
+# Importer flags not accepted as extra options: the ones that carry a secret
+# (the wizard asks for those hidden) and the ones the wizard sets itself.
+SECRET_FLAGS = ("--app-password", "--password", "--key", "--content-api-key")
+MANAGED_FLAGS = ("--limit", "--out-dir", "--prefix")
+# Query parameters that hold a key or token (the same list as importers/common.py).
+SECRET_PARAMS = {"key", "api_key", "apikey", "token", "access_token", "password", "secret"}
+EXTRA_OPTION_EXAMPLES = {
+    "wordpress-api": "--post-type story  or  --after 2020-01-01",
+    "wordpress-export": "--post-type story  or  --timezone America/New_York",
+    "feed": "--require-full-text  or  --default-timezone America/New_York",
+    "csv": "--date-format '%m/%d/%Y'  or  --headline-col Title  or  --encoding cp1252",
+    "drupal": "--type story  or  --byline-field field_byline",
+    "ghost": "--after 2020-01-01  or  --include-pages",
+}
+
+
+@dataclass
+class ImportPlan:
+    source: str                                             # importer NAME
+    args: List[str]                                         # its options; never a secret
+    env: Dict[str, str] = field(default_factory=dict)       # logins/keys, passed in the importer's environment
+    env_lines: List[str] = field(default_factory=list)      # shell lines that set them again, without the values
+    answers: Dict[str, str] = field(default_factory=dict)   # offered as defaults when trying again
+
+
+def shell_join(cmd) -> str:
+    return subprocess.list2cmdline(cmd) if os.name == "nt" else shlex.join(cmd)
+
+
+def importer_command(plan: ImportPlan, limit: Optional[int] = None, python: str = "python") -> List[str]:
+    cmd = [python, IMPORT_SCRIPT, plan.source, *plan.args]
+    return cmd + ["--limit", str(limit)] if limit else cmd
+
+
+def importer_env(plan: ImportPlan) -> Dict[str, str]:
+    """This process's environment without importer logins, plus the ones given in this wizard."""
+    logins = {name for names in IMPORTER_ENV.values() for name in names}
+    env = {k: v for k, v in os.environ.items() if k not in logins}
+    env.update(plan.env)
+    env["PYTHONUNBUFFERED"] = "1"  # keeps progress lines and the report in order when output is piped
+    return env
+
+
+def read_secret_line(name: str) -> str:
+    return f"read -rs {name} && export {name}   # paste it, press Enter; it isn't shown or saved"
+
+
+def path_from_input(raw: str) -> Path:
+    """A path as typed or dragged into the terminal: quotes, ~ and backslash-escaped spaces handled."""
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        raw = raw[1:-1]
+    path = Path(raw).expanduser()
+    if not path.exists() and "\\ " in raw:  # macOS Terminal escapes spaces in dragged-in paths
+        path = Path(raw.replace("\\ ", " ")).expanduser()
+    return path if path.is_absolute() else Path.cwd() / path
+
+
+def clean_url(raw: str, key_param: bool = False):
+    """
+    Check a web address typed for an importer. Returns (url, key, problem):
+    https:// is added when no scheme is given; with key_param (Ghost), a ?key=
+    value is moved out of the URL into `key` so it never appears in a command.
+    """
+    url = raw.strip()
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", url):
+        url = "https://" + url
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        parts, host = None, None
+    if parts is None or not host or parts.scheme.lower() not in ("http", "https") or re.search(r"\s", url):
+        return "", "", "That doesn't look like a web address; try again, e.g. https://www.example.com"
+    if "@" in parts.netloc:
+        return "", "", ("Leave the username and password out of the address. If the site needs a login, "
+                        "you'll be asked for it separately (hidden).")
+    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    secret = [(k, v) for k, v in query if k.lower() in SECRET_PARAMS]
+    key = ""
+    if secret:
+        if not key_param:
+            return "", "", "That address contains a key or token (?key=, ?token=...); leave that part out."
+        key = next((v.strip() for k, v in secret if k.lower() == "key"), "")
+        rest = [(k, v) for k, v in query if k.lower() not in SECRET_PARAMS]
+        url = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(rest)))
+    return url, key, None
+
+
+def ask_or_skip(prompt: str, default: str = "") -> str:
+    return ask(prompt if default else f"{prompt} (Enter to skip importing for now)", default)
+
+
+def ask_url(prompt: str, default: str = "", key_param: bool = False):
+    """Returns (url, key from the URL); url is "" when the user skips."""
+    while True:
+        raw = ask_or_skip(prompt, default)
+        if not raw:
+            return "", ""
+        url, key, problem = clean_url(raw, key_param)
+        if not problem:
+            return url, key
+        say("  " + problem)
+        default = ""
+
+
+def ask_existing_path(prompt: str, default: str = "", allow_dir: bool = False) -> Optional[Path]:
+    while True:
+        raw = ask_or_skip(prompt, default)
+        if not raw:
+            return None
+        path = path_from_input(raw)
+        if path.is_file() or (allow_dir and path.is_dir()):
+            return path.resolve()
+        say(f"  Couldn't find {'a file or folder' if allow_dir else 'a file'} at {path}.")
+        say("  Tip: drag the file into this window to paste its full path.")
+        default = ""
+
+
+def secret_default(prev: Optional[ImportPlan], name: str):
+    """(value, description) offered when Enter is pressed at a hidden prompt."""
+    if prev and prev.env.get(name):
+        return prev.env[name], "the one you typed before"
+    if os.environ.get(name):
+        return os.environ[name], f"the one already set in {name}"
+    return "", ""
+
+
+def add_login(plan: ImportPlan, prev: Optional[ImportPlan], user_env: str, secret_env: str,
+              user_label: str, secret_label: str) -> None:
+    user_default = (prev.env.get(user_env) if prev else "") or os.environ.get(user_env, "")
+    user = ask(user_label, user_default, required=True)
+    existing, kept = secret_default(prev, secret_env)
+    secret = ask_secret(f"{secret_label} (hidden)", existing, kept)
+    if not secret:
+        say(f"  No {secret_label}, so the importer reads only what the public can see.")
+        return
+    plan.env.update({user_env: user, secret_env: secret})
+    plan.answers["user"] = user
+    plan.env_lines += [f"export {user_env}={shlex.quote(user)}", read_secret_line(secret_env)]
+
+
+def plan_wordpress_api(prev: Optional[ImportPlan]) -> Optional[ImportPlan]:
+    a = prev.answers if prev else {}
+    say("Reads published, public posts from your live site. To check the address, open")
+    say('<your site>/wp-json/ in a browser: you should see text starting with {"name":')
+    site, _ = ask_url("Your site's public address, e.g. https://www.example.com", a.get("site", ""))
+    if not site:
+        return None
+    plan = ImportPlan("wordpress-api", ["--site", site], answers={"site": site})
+    say("A login is only needed if that check shows an error instead (the site closes its API")
+    say("to the public).")
+    if ask_yes("Does the site need a login for its API?", default=bool(a.get("user"))):
+        say("  Use an Application Password, not your normal password: wp-admin > Users > Profile >")
+        say("  Application Passwords, type a name such as Dewey, click 'Add Application Password'")
+        say("  ('Add New Application Password' before WordPress 6.8)")
+        say("  and copy the code (it is shown only once).")
+        add_login(plan, prev, *IMPORTER_ENV["wordpress-api"], "WordPress username", "Application Password")
+    return plan
+
+
+def plan_wordpress_export(prev: Optional[ImportPlan]) -> Optional[ImportPlan]:
+    a = prev.answers if prev else {}
+    say("In wp-admin: Tools > Export, choose 'All content' and click 'Download Export File'.")
+    say("A .xml, .xml.gz or .zip file works, or a folder of them (big sites may come in parts).")
+    path = ask_existing_path("Path to the export file or folder", a.get("file", ""), allow_dir=True)
+    if path is None:
+        return None
+    return ImportPlan("wordpress-export", ["--file", str(path)], answers={"file": str(path)})
+
+
+def plan_feed(prev: Optional[ImportPlan]) -> Optional[ImportPlan]:
+    a = prev.answers if prev else {}
+    say("Feeds usually list only the latest stories. The importer follows links to older pages")
+    say("when the feed has them, but for a whole WordPress, Drupal or Ghost archive their own")
+    say("importers reach further back. Usual addresses: WordPress <site>/feed/, Drupal")
+    say("<site>/rss.xml, Ghost <site>/rss/. Your homepage works if it advertises its feed.")
+    default = a.get("feed", "")
+    while True:
+        raw = ask_or_skip("Feed address, or the path to a saved feed file or folder", default)
+        if not raw:
+            return None
+        default = ""
+        path = path_from_input(raw)
+        if path.exists():
+            return ImportPlan("feed", ["--file", str(path.resolve())], answers={"feed": raw})
+        if raw.startswith(("/", "~", ".", "\\")) or re.match(r"^[A-Za-z]:[\\/]", raw):
+            say(f"  Couldn't find a file or folder at {path}.")
+            continue
+        url, _, problem = clean_url(raw)
+        if problem:
+            say("  " + problem)
+            continue
+        return ImportPlan("feed", ["--url", url], answers={"feed": url})
+
+
+def plan_csv(prev: Optional[ImportPlan]) -> Optional[ImportPlan]:
+    a = prev.answers if prev else {}
+    say("One row per article, with a header row. Save or download spreadsheets as CSV first")
+    say("(choose UTF-8 if your program offers it).")
+    say("The importer finds the columns by their names and prints the mapping first: check it.")
+    path = ask_existing_path("Path to the CSV file", a.get("file", ""))
+    if path is None:
+        return None
+    return ImportPlan("csv", ["--file", str(path)], answers={"file": str(path)})
+
+
+def plan_drupal(prev: Optional[ImportPlan]) -> Optional[ImportPlan]:
+    a = prev.answers if prev else {}
+    say("Beta: tested against sample exports only, not yet against a live newsroom site. Check")
+    say("the trial run's articles (headlines, bylines, dates, links) before importing everything.")
+    say("Needs Drupal 8.7+ with the JSON:API module turned on: <your site>/jsonapi should show")
+    say('JSON whose "links" list "node--article".')
+    site, _ = ask_url("Your site's public address, e.g. https://www.example.com", a.get("site", ""))
+    if not site:
+        return None
+    plan = ImportPlan("drupal", ["--site", site], answers={"site": site})
+    say("A login is only needed if <your site>/jsonapi refuses visitors who aren't logged in.")
+    if ask_yes("Does it need a login?", default=bool(a.get("user"))):
+        say("  Needs Drupal's core 'HTTP Basic Authentication' module. Use an account with no extra")
+        say("  roles (People > Add user, e.g. dewey-reader): what it can see is what gets imported.")
+        add_login(plan, prev, *IMPORTER_ENV["drupal"], "Drupal username", "Password for that account")
+    return plan
+
+
+def plan_ghost(prev: Optional[ImportPlan]) -> Optional[ImportPlan]:
+    a = prev.answers if prev else {}
+    (key_env,) = IMPORTER_ENV["ghost"]
+    say("Beta: tested against sample exports only, not yet against a live newsroom site. Check")
+    say("the trial run's articles (headlines, bylines, dates, links) before importing everything.")
+    say("In Ghost Admin (your site address + /ghost): Settings > Integrations (under Advanced in")
+    say("recent versions) > 'Add custom integration', name it Dewey. Copy its API URL and its")
+    say("Content API key (26 letters and digits; not the Admin API key, which has a colon).")
+    url, key_from_url = ask_url("The integration's API URL (or your site's address)", a.get("url", ""),
+                                key_param=True)
+    if not url:
+        return None
+    if key_from_url:
+        say("  Took the key= part out of the address; it's used as the Content API key below.")
+    existing, kept = (key_from_url, "the key from the address") if key_from_url else secret_default(prev, key_env)
+    key = ask_secret("Content API key (hidden)", existing, kept)
+    if not key:
+        say("  The Ghost importer can't run without a Content API key; skipping the import for now.")
+        return None
+    return ImportPlan("ghost", ["--url", url], env={key_env: key}, env_lines=[read_secret_line(key_env)],
+                      answers={"url": url})
+
+
+PLAN_QUESTIONS = {
+    "wordpress-api": plan_wordpress_api,
+    "wordpress-export": plan_wordpress_export,
+    "feed": plan_feed,
+    "csv": plan_csv,
+    "drupal": plan_drupal,
+    "ghost": plan_ghost,
+}
+
+
+_LOGIN_PREFIX = re.compile(r"^[^/\s:@]+:[^/\s@]*@")  # user:pass@host, as importers/feed.py checks
+
+
+def address_has_secret(value: str) -> bool:
+    """True for a web address carrying a login (user:pass@) or a key/token query parameter."""
+    if "://" not in value and not _LOGIN_PREFIX.match(value):
+        return False
+    if _LOGIN_PREFIX.match(value):
+        return True
+    try:
+        parts = urllib.parse.urlsplit(value)
+    except ValueError:
+        return False
+    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    return "@" in parts.netloc or any(k.lower() in SECRET_PARAMS for k, _ in query)
+
+
+def extra_options_problem(tokens: List[str], source: str = "<source>") -> Optional[str]:
+    for token in tokens:
+        # Values too (`--url X` and `--url=X`): an address with a login or ?key= would put a
+        # secret on the command line, which is printed. The importers accept some of them.
+        if address_has_secret(token.split("=", 1)[1] if token.startswith("--") and "=" in token else token):
+            return ("That contains a password, key or token in a web address, which would put it on the "
+                    "command line. Choose 'change' and answer the login or key question instead; that is "
+                    "typed hidden.")
+        if token == "-h":
+            token = "--help"
+        if not token.startswith("--") or token == "--":
+            continue
+        name = token.split("=", 1)[0]
+        if "--help".startswith(name):
+            return f"To see every option, run: python {IMPORT_SCRIPT} {source} --help (it imports nothing)."
+        # argparse also accepts any unambiguous abbreviation (--app-pass), so check prefixes.
+        for flag in SECRET_FLAGS:
+            if flag.startswith(name):
+                return (f"{flag} would put a secret on the command line. Choose 'change' and answer the "
+                        "login or key question instead; that is typed hidden.")
+        for flag in MANAGED_FLAGS:
+            if flag.startswith(name):
+                return (f"This setup sets {flag} itself. To choose it, run the importer yourself with the "
+                        "command shown at the end.")
+    return None
+
+
+def ask_extra_options(plan: ImportPlan, prev: ImportPlan) -> None:
+    say(f"You can add importer options, e.g. {EXTRA_OPTION_EXAMPLES[plan.source]}")
+    say(f"(every option: python {IMPORT_SCRIPT} {plan.source} --help). The message above often names one.")
+    default = prev.answers.get("extra", "")
+    while True:
+        raw = ask("Extra options (Enter for none" + (", '-' to drop these" if default else "") + ")", default)
+        if not raw or raw == "-":
+            return
+        try:
+            tokens = shlex.split(raw, posix=os.name != "nt")
+        except ValueError as e:
+            say(f"  Couldn't read that ({e}); check the quotes.")
+            default = ""
+            continue
+        problem = extra_options_problem(tokens, plan.source)
+        if problem:
+            say("  " + problem)
+            default = ""
+            continue
+        plan.args += tokens
+        plan.answers["extra"] = raw
+        return
+
+
+def run_importer(plan: ImportPlan, limit: Optional[int] = None) -> bool:
+    cmd = importer_command(plan, limit, python=sys.executable)
+    say("  $ " + shell_join(cmd))  # no secret in it: those are in the environment
+    try:
+        proc = subprocess.Popen(cmd, cwd=ROOT, env=importer_env(plan))
+    except OSError as e:
+        say(f"  Couldn't start the importer: {e}")
+        return False
+    try:
+        return proc.wait() == 0
+    except KeyboardInterrupt:
+        # The importer got Ctrl+C too; let it remove its temporary files before stopping.
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise
+
+
+def json_snapshot(folder: Path) -> Dict[str, int]:
+    try:
+        return {p.name: p.stat().st_mtime_ns for p in folder.glob("*.json")}
+    except OSError:
+        return {}
+
+
+def show_import_commands(plan: ImportPlan, trial: bool = False, again: bool = False) -> None:
+    say()
+    say(f"To run this import{' again' if again else ''} later, from the Dewey folder ({ROOT}):")
+    for line in plan.env_lines:
+        say("  " + line)
+    if trial:
+        say("  " + shell_join(importer_command(plan, TRIAL_LIMIT)) + "   # trial run")
+    say("  " + shell_join(importer_command(plan)))
+    if plan.env_lines and os.name == "nt":
+        say("  (Windows: set those environment variables in your terminal instead of using export/read;")
+        say("  never put the password or key on the command line.)")
+    say("Re-running reads everything again and replaces the files from the last run of the same")
+    say("import. Stories deleted or unpublished in your CMS stay in Dewey's index until you rebuild")
+    say("it (see 'Importing your archive' in the README).")
+
+
+def offer_trial_cleanup(files) -> None:
+    files = sorted(p for p in files if p.exists())
+    if not files:
+        return
+    say(f"The trial run wrote {len(files)} sample file(s): {', '.join(p.name for p in files)}")
+    say("They're only samples. Indexing them next to the full import repeats work (each article is")
+    say("stored once, but embedded again).")
+    if ask_yes("Remove the sample file(s)?", default=True):
+        for p in files:
+            try:
+                p.unlink()
+            except OSError as e:
+                say(f"  Couldn't remove {p.name}: {e}")
+        say("  Removed.")
+
+
+def get_archive(dry_run: bool = False) -> None:
+    heading("Get your archive into Dewey")
+    data_dir = ROOT / "data"
+    existing = sorted(data_dir.glob("*.json"))
+    say("Dewey searches article files (JSON) in the data/ folder. An importer can make them from")
+    say("your CMS, a feed or a spreadsheet. Importers only read: they never change your site, and")
+    say("they keep published, public stories only. A small trial run comes first.")
+    if existing:
+        say(f"data/ already has {len(existing)} JSON file(s). An import adds its own files; importing")
+        say("the same source again replaces that source's earlier files.")
+    source = choose("Where is your archive?", IMPORT_SOURCES, default="json" if existing else "skip",
+                    mark="default")
+    if source == "skip":
+        say("Skipped. To import later, run this from the Dewey folder to see the options:")
+        say(f"  python {IMPORT_SCRIPT} --help")
+        return
+    if source == "json":
+        if existing:
+            say(f"Using the {len(existing)} JSON file(s) already in data/.")
+        else:
+            say("data/ has no .json files yet. Put your article files there (format in the README).")
+        return
+
+    prev: Optional[ImportPlan] = None
+    trial_files = set()
+    while True:
+        plan = PLAN_QUESTIONS[source](prev)
+        if plan is None:
+            say(f"Skipped. To import later: python {IMPORT_SCRIPT} {source} --help")
+            return
+        if prev is not None:
+            ask_extra_options(plan, prev)
+        if dry_run:
+            say("(--dry-run: nothing is imported. These are the commands this would run.)")
+            show_import_commands(plan, trial=True)
+            return
+
+        if ask_yes(f"Try a small import first ({TRIAL_LIMIT} articles, saved as separate -sample files)?",
+                   default=True):
+            before = json_snapshot(data_dir)
+            trial_ok = run_importer(plan, limit=TRIAL_LIMIT)
+            after = json_snapshot(data_dir)
+            trial_files |= {data_dir / n for n, m in after.items() if before.get(n) != m and "-sample-" in n}
+            say()
+            if trial_ok:
+                say("Check the report above (how many articles, their dates, missing bylines, what was")
+                say("skipped and why), and open the -sample file in data/ to check a few stories.")
+            else:
+                say("The trial stopped; the message above says what to change.")
+            next_step = choose("What next?", [
+                ("full", "Import everything with these settings"),
+                ("change", "Change the answers (or add importer options) and try again"),
+                ("stop", "Stop here; the command to import later is shown next"),
+            ], default="full" if trial_ok else "change", mark="default")
+        else:
+            next_step = "full"
+
+        if next_step == "full":
+            say("A big archive can take a while. Ctrl+C stops it (and this setup) without changing data/.")
+            if run_importer(plan):
+                say()
+                offer_trial_cleanup(trial_files)
+                show_import_commands(plan, again=True)
+                return
+            next_step = choose("The import stopped; the message above says why. What next?", [
+                ("change", "Change the answers (or add importer options) and try again"),
+                ("stop", "Stop here; the command to import later is shown next"),
+            ], default="change", mark="default")
+        if next_step == "change":
+            prev = plan
+            continue
+        if trial_files:
+            say("The trial articles stay in data/: indexing them is a quick way to try Dewey first.")
+        show_import_commands(plan, trial=True)
+        return
+
+
 def missing_required(values: dict) -> list:
     stack = values["DEWEY_STACK"]
     need = []
@@ -552,8 +1050,11 @@ def main() -> int:
         say(f"Still missing: {', '.join(missing)}. Dewey won't start until these are set; "
             "re-run this installer or edit .env when you have them.")
 
+    postgres_stack = stack in ("anthropic", "open")
     if args.dry_run:
         say("\n(--dry-run: nothing was written.)")
+        if postgres_stack:
+            get_archive(dry_run=True)
         return 0
     if not ask_yes("Write this to .env?", default=True):
         say("Nothing written.")
@@ -563,12 +1064,16 @@ def main() -> int:
     install_dependencies(values)
     if not missing and ask_yes("Check your credentials and services now?", default=True):
         check_services(values)
+    if postgres_stack:
+        get_archive()  # importers need no keys or database, so this runs even with settings missing
     if not missing:
         index_archive(values)
 
     heading("Next steps")
     if missing:
         say(f"1. Fill in: {', '.join(missing)} (re-run python install.py)")
+        if postgres_stack:
+            say("2. Index your archive:  python app/setup_postgres.py")
     say("Start Dewey:  python app/main.py   then open http://localhost:7860")
     say("Before relying on answers, ask questions you already know the answers to and check")
     say("each citation against the article it links to.")

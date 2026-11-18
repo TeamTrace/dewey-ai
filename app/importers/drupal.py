@@ -1,6 +1,9 @@
 """
 Drupal JSON:API importer: published article nodes from a Drupal 8.7+ site.
 
+Beta: tested against sample exports only (fixtures shaped like Drupal core's
+JSON:API responses), not yet against a live newsroom site.
+
     python app/import_archive.py drupal --site https://www.example.com --limit 20
 
 Reads <site>/jsonapi/node/<type> (Drupal core's JSON:API module) 50 nodes at a
@@ -37,7 +40,8 @@ from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple
 from importers.common import ImporterError, clean_text, http_get_json, parse_date
 
 NAME = "drupal"
-HELP = "Published articles from a Drupal 8.7+ site, read through its core JSON:API module."
+HELP = ("Beta (tested against sample exports only): published articles from a Drupal 8.7+ site, "
+        "read through its core JSON:API module.")
 
 USER_ENV = "DRUPAL_USER"
 PASSWORD_ENV = "DRUPAL_PASSWORD"

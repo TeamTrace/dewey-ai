@@ -54,7 +54,8 @@ where to find each value:
                   be story or stories.
   --user          Your WordPress username: wp-admin > Users > Profile, "Username".
   --app-password  wp-admin > Users > Profile > Application Passwords: type a name
-                  such as Dewey, click "Add New Application Password" and copy the
+                  such as Dewey, click "Add Application Password" ("Add New
+                  Application Password" before WordPress 6.8) and copy the
                   code (it is shown only once). It is not your login password. Needs
                   WordPress 5.6+ and an https:// site; if the section is missing, a
                   plugin or your host has turned Application Passwords off.
