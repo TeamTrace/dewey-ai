@@ -1,0 +1,83 @@
+# Dewey + Postgres/pgvector on one machine. Step-by-step: docs/DEPLOYMENT.md.
+#
+#   cp .env.template .env            # set DEWEY_STACK, API keys and POSTGRES_PASSWORD
+#   python3 app/manage_users.py add alice
+#   docker compose up -d --build
+#   docker compose run --rm -v ./data:/app/data:ro dewey python app/setup_postgres.py   # index data/*.json
+#
+# Open-weight chat model in a container too (DEWEY_STACK=open):
+#   set OPEN_LLM_BASE_URL='http://ollama:11434/v1' in .env, then
+#   docker compose --profile ollama up -d
+#   docker compose exec ollama ollama pull qwen3:8b
+
+services:
+  dewey:
+    build:
+      context: .
+      args:
+        INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides DATABASE_URL from .env so Dewey uses the db service below.
+      # Remove this line to use an external Postgres (Neon, Supabase, ...) set in .env.
+      DATABASE_URL: "postgresql://dewey:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (letters and digits only)}@db:5432/dewey"
+      DEWEY_USERS_FILE: /app/users.txt
+      # Pinned so a GRADIO_SERVER_NAME/GRADIO_SERVER_PORT left in .env for local
+      # runs can't move Dewey away from the port published below.
+      GRADIO_SERVER_NAME: "0.0.0.0"
+      GRADIO_SERVER_PORT: "7860"
+    volumes:
+      # Login accounts, managed on the host with app/manage_users.py. Must exist
+      # before `up` (create_host_path: false stops Docker from creating an empty
+      # directory in its place). Restart dewey after changing it.
+      - type: bind
+        source: ./users.txt
+        target: /app/users.txt
+        read_only: true
+        bind:
+          create_host_path: false
+      # Downloaded local models (only used with INSTALL_LOCAL_MODELS=true).
+      - hf-cache:/home/dewey/.cache/huggingface
+    ports:
+      # Published on the host's loopback address only: reachable from the host
+      # itself (and an HTTPS reverse proxy running on it), not from the network.
+      # Put Caddy or nginx with a TLS certificate in front and point it at
+      # 127.0.0.1:7860. Don't change this to "7860:7860" unless something else
+      # (a firewall, a private network) already limits who can connect.
+      - "127.0.0.1:7860:7860"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dewey
+      POSTGRES_DB: dewey
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (letters and digits only)}"
+    volumes:
+      # Postgres 18+ images keep data under /var/lib/postgresql (not .../data).
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dewey -d dewey"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No "ports:": the database is reachable only from the other services in
+    # this file. For a one-off psql session use:  docker compose exec db psql -U dewey
+
+  ollama:
+    image: ollama/ollama  # pin a version tag for repeatable deployments
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # Not published to the host; Dewey reaches it at http://ollama:11434/v1.
+    # For an NVIDIA GPU, see https://raw.githubusercontent.com/ollama/ollama/main/docs/docker.mdx
+
+volumes:
+  pgdata:
+  hf-cache:
+  ollama:

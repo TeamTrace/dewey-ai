@@ -1,5 +1,6 @@
 """Azure AI Search retriever (original Dewey behavior, moved out of dewey.py)."""
 import json
+import sys
 from datetime import date
 from typing import Any, Dict, List, Optional
 
@@ -22,7 +23,7 @@ def _iso_date(value: Any) -> Optional[str]:
     try:
         return date.fromisoformat(value).isoformat() if value else None
     except (TypeError, ValueError):
-        print(f"Ignoring unparseable date: {value!r}")
+        print(f"Ignoring unparseable date: {value!r}", file=sys.stderr)
         return None
 
 
@@ -72,7 +73,7 @@ class AzureSearchRetriever:
         ]
 
         filter = build_filter(metadata)
-        print(filter)
+        print(filter, file=sys.stderr)
 
         results = self.search_client.search(
             search_text=metadata["question"],

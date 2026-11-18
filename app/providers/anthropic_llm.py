@@ -12,6 +12,7 @@ Differences from the Azure OpenAI provider, and why:
 - `stop_reason == "refusal"` is checked before reading output, because a
   decline arrives as HTTP 200, not as an error.
 """
+import sys
 from typing import Any, Dict, Iterator, List, Optional
 
 import anthropic
@@ -87,7 +88,7 @@ class AnthropicLLM:
             # Degrade to an unfiltered search on the user's own words rather
             # than failing the whole request.
             print(f"Metadata step returned no structured output (stop_reason={response.stop_reason}); "
-                  "falling back to unfiltered search.")
+                  "falling back to unfiltered search.", file=sys.stderr)
             return {
                 "question": _last_user_text(claude_messages),
                 "date_range": {"start_date": None, "end_date": None},

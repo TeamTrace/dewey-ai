@@ -4,9 +4,11 @@ Stack selection. `DEWEY_STACK` picks which vendors Dewey runs on:
     azure      Azure OpenAI (chat + embeddings) + Azure AI Search   [default]
     anthropic  Claude (chat) + Postgres/pgvector; embeddings and reranking
                default to hosted Voyage AI
-    open       open-weight chat model on an OpenAI-compatible local server
-               (e.g. Ollama) + Postgres/pgvector; embeddings and reranking
-               default to open-weight models run locally
+    open       open-weight chat model on an OpenAI-compatible server (your
+               own, e.g. Ollama, or hosted on OpenRouter) + Postgres/pgvector;
+               embeddings and reranking default to open-weight models run
+               locally. On OpenRouter, OPENROUTER_PRIVACY (strict | standard |
+               off, default strict) sets the privacy routing; see open_llm.py.
 
 For the two Postgres stacks, EMBEDDING_PROVIDER (voyage | local) and
 RERANK_PROVIDER (voyage | local | none) override those defaults; see
@@ -16,7 +18,9 @@ Vendor SDKs are imported lazily so a deployment only needs the packages for
 the stack it uses.
 """
 import os
+import sys
 from typing import Tuple
+from urllib.parse import urlsplit
 
 from models import NewsroomConfig
 
@@ -94,16 +98,35 @@ def build_stack(newsroom: NewsroomConfig) -> Tuple[LLMProvider, Retriever]:
         return llm, retriever
 
     # stack == "open"
-    from .open_llm import DEFAULT_BASE_URL, OpenLLM
+    from .open_llm import DEFAULT_BASE_URL, OpenLLM, is_openrouter_url
 
     _require("OPEN_LLM_MODEL", "DATABASE_URL")
+    # Blank means the default: install.py writes OPEN_LLM_BASE_URL='' when the user keeps local Ollama.
+    base_url = os.getenv("OPEN_LLM_BASE_URL", "").strip() or DEFAULT_BASE_URL
+    privacy_setting = os.getenv("OPENROUTER_PRIVACY", "").strip()
+    if is_openrouter_url(base_url):
+        if urlsplit(base_url).scheme != "https":
+            raise StackConfigError("OPEN_LLM_BASE_URL points at OpenRouter but doesn't use https://, so the API key "
+                                   "and every question would be sent unencrypted. Use https://openrouter.ai/api/v1.")
+        if not os.getenv("OPEN_LLM_API_KEY", "").strip():
+            raise StackConfigError("OPEN_LLM_BASE_URL points at OpenRouter, so OPEN_LLM_API_KEY must be set "
+                                   "to an OpenRouter API key.")
+    elif privacy_setting:
+        # stderr, not stdout: stdout is the MCP server's JSON-RPC channel.
+        print(f"Dewey: warning: OPENROUTER_PRIVACY is set but ignored: OPEN_LLM_BASE_URL ({base_url}) is not on "
+              "openrouter.ai, so no OpenRouter privacy preferences are sent. If this server forwards to OpenRouter, "
+              "set privacy in your OpenRouter account settings instead.", file=sys.stderr)
+    try:
+        llm = OpenLLM(
+            newsroom,
+            model=os.environ["OPEN_LLM_MODEL"],
+            base_url=base_url,
+            api_key=os.getenv("OPEN_LLM_API_KEY", "").strip(),
+            privacy=privacy_setting,
+        )
+    except ValueError as e:
+        raise StackConfigError(str(e)) from None
     retriever = build_pgvector_store()
-    llm = OpenLLM(
-        newsroom,
-        model=os.environ["OPEN_LLM_MODEL"],
-        base_url=os.getenv("OPEN_LLM_BASE_URL", DEFAULT_BASE_URL),
-        api_key=os.getenv("OPEN_LLM_API_KEY", ""),
-    )
     return llm, retriever
 
 

@@ -1,0 +1,19 @@
+# Keep secrets, local state and articles out of the Docker build context.
+# The Dockerfile copies only requirements*.txt and app/.
+.git
+.github
+.claude
+.env
+.env.*
+!.env.template
+users.txt
+**/users.txt
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.ruff_cache
+.pytest_cache
+tests
+# Articles are indexed into Postgres (app/setup_postgres.py), not baked into the image.
+data/*.json

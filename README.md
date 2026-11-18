@@ -116,6 +116,8 @@ Steps:
    ollama pull qwen3:8b        # or another model; larger models need more RAM/VRAM
    ```
    Ollama serves an OpenAI-compatible API at `http://localhost:11434/v1`, which is Dewey's default. For another server, set `OPEN_LLM_BASE_URL` (and `OPEN_LLM_API_KEY` if it needs one).
+
+   For choosing a model (including Hermes models and their licenses), running it on vLLM, or using a hosted model through OpenRouter instead of your own hardware, see [docs/MODELS.md](docs/MODELS.md). With OpenRouter, questions and article excerpts leave your network; Dewey asks it for privacy-preserving routing by default (`OPENROUTER_PRIVACY`).
 3. **Configure `.env`:**
    ```bash
    DEWEY_STACK="open"
@@ -260,6 +262,36 @@ The application will be available at `http://localhost:7860`. This project uses 
 3. **Expand Dewey's though process** to see *what was searched* and *how many articles* were retrieved
 
 Bylines: on the `anthropic` and `open` stacks, an author filter ignores capitals and extra spaces ("jane doe" finds "Jane Doe"), but it needs the whole name as the byline has it ("Doe" alone finds nothing). In a Postgres database created with the plain `C` locale, only the letters A-Z are matched regardless of case, so "JOSÉ" won't find "José" there. The `azure` stack matches names exactly. Articles imported without a byline are never found by an author filter.
+
+
+## Deploying Dewey
+
+`python app/main.py` serves Dewey at `http://127.0.0.1:7860`, which only your own computer can reach. To let colleagues use it:
+
+1. **Create login accounts:** `python app/manage_users.py add NAME`. Passwords are stored as salted hashes in `users.txt`, which git ignores.
+2. **Run it on a server:** the repo has a `Dockerfile`, a `docker-compose.yml` (Dewey + Postgres/pgvector, optional Ollama), and Fly.io and Render examples in `deploy/`.
+3. **Put HTTPS in front of it.**
+
+Dewey refuses to listen on a network address without accounts, unless `DEWEY_ALLOW_NO_AUTH=true` (only for setups behind a single-sign-on proxy). It always turns off Gradio's telemetry, API page, monitoring page and share links.
+
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has step-by-step guides, a comparison of hosting options (including why Netlify and Hugging Face Spaces don't fit), and a security checklist.
+
+
+## Use Dewey from AI agents (MCP)
+
+`app/mcp_server.py` lets AI agents that support MCP (Hermes Agent, Claude Code, Claude Desktop and
+others) search the archive while they work. It has two tools: `search_archive` returns matching article
+excerpts with their URLs and calls no language model, and `ask_archive` runs Dewey's full pipeline and
+returns a cited answer (on paid stacks, each call costs the same as a question in the web app). It uses
+the same `.env` and index as the web app, on any stack.
+
+```bash
+python app/mcp_server.py           # stdio: the agent starts this itself (most setups)
+python app/mcp_server.py --http    # one shared server; requires DEWEY_MCP_TOKEN
+```
+
+See [docs/MCP.md](docs/MCP.md) for agent configuration, the HTTP token setup, and security notes.
+Article text the tools return is untrusted input to the agent.
 
 
 ## Contributing

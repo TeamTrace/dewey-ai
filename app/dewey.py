@@ -8,6 +8,16 @@ from contextlib import contextmanager
 from providers.base import LLMProvider, Retriever
 
 
+class _SilentStep:
+    """Step used when show_steps=False (e.g. the MCP server): reports nothing."""
+
+    def start(self, content=""):
+        return None
+
+    def complete(self, content=""):
+        return None
+
+
 class Dewey:
     def __init__(self, llm: LLMProvider, retriever: Retriever):
         # Vendor-specific work lives in providers/; see providers/__init__.py
@@ -19,7 +29,8 @@ class Dewey:
     @contextmanager
     def step(self, title, show_steps=True):
         if not show_steps:
-            yield lambda: None
+            # start()/complete() return None, so process() yields only the answer text.
+            yield _SilentStep()
             return
             
         step = {"title": title, "status": "pending"}
