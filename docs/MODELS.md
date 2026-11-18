@@ -214,8 +214,8 @@ The 400 case is our guess, *unverified*.)
 | HTTP 401 | The key is missing, wrong or revoked. |
 | HTTP 402 | The account or key is out of credits. |
 
-The web app doesn't show these details to the journalist. The full message is in the log of the
-process running `app/main.py` (or `app/mcp_server.py`).
+The demo page doesn't show these details to the journalist. The full message is in the log of the
+process running `app/mcp_server.py` (for `ask_archive`) or `app/main.py`.
 
 ## Hermes model licenses
 

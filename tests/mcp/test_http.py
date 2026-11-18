@@ -116,6 +116,16 @@ class NonLoopbackBindTest(unittest.TestCase):
             self.assertEqual(post_initialize(server.url, {**auth, "Host": "dewey.lan:8765"}).status_code, 200)
             self.assertIn("TLS reverse proxy", server.stderr())
 
+    def test_compose_host_names_work_without_extra_flags(self):
+        # docker-compose.yml runs --host 0.0.0.0 in the container; clients reach it as 127.0.0.1:8765
+        # (the host's published port) or dewey-mcp:8765 / dewey:8765 (other containers).
+        auth = {"Authorization": f"Bearer {TEST_TOKEN}"}
+        with HttpServer(["--host", "0.0.0.0"], server_env(DEWEY_MCP_TOKEN=TEST_TOKEN)) as server:
+            for host in ["127.0.0.1:8765", "localhost:8765", "dewey-mcp:8765", "dewey:8765"]:
+                with self.subTest(host=host):
+                    self.assertEqual(post_initialize(server.url, {**auth, "Host": host}).status_code, 200)
+                    self.assertEqual(post_initialize(server.url, {"Host": host}).status_code, 401)
+
 
 class NoAuthTest(unittest.TestCase):
     def test_no_auth_on_loopback(self):

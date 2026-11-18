@@ -1,10 +1,13 @@
-# Fly.io configuration for Dewey. Copy to the repository root as fly.toml and
-# change `app` and `primary_region`. Walkthrough: docs/DEPLOYMENT.md ("Fly.io").
-# Keys are from Fly's configuration reference:
+# Fly.io configuration for Dewey's MCP server. Copy to the repository root as
+# fly.toml and change `app` and `primary_region`. Walkthrough: docs/DEPLOYMENT.md
+# ("Fly.io"). Keys are from Fly's configuration reference:
 # https://github.com/superfly/docs/blob/main/reference/configuration.mdx
 #
-# Secrets (API keys, DATABASE_URL, DEWEY_USERS) do not go in this file; set them
-# with `fly secrets set NAME=value`. Fly injects them as environment variables.
+# Secrets (API keys, DATABASE_URL, DEWEY_MCP_TOKEN) do not go in this file; set
+# them with `fly secrets set NAME=value`. Fly injects them as environment variables.
+#
+# The image's default command (see Dockerfile) runs the MCP server on port 8765.
+# The demo chat page has no login and is not meant to run here.
 
 app = "your-dewey-app"      # must be unique on Fly.io
 primary_region = "ord"      # three-letter Fly region code; put it near your database
@@ -16,26 +19,27 @@ primary_region = "ord"      # three-letter Fly region code; put it near your dat
 # Non-secret settings.
 [env]
   DEWEY_STACK = "anthropic"
-  DEWEY_CONCURRENCY = "4"
   # NEWSROOM_NAME = "Your Newsroom"
 
 [http_service]
-  internal_port = 7860           # the Dockerfile sets GRADIO_SERVER_PORT=7860
+  internal_port = 8765           # the Dockerfile's command listens on 8765
   force_https = true
   # "stop" saves money while nobody is using Dewey, at the cost of a slower
-  # first request and everyone being logged out (logins live in memory).
-  # Use "off" to keep it running.
+  # first request. MCP sessions live in the server's memory, so a stop ends
+  # them and clients have to reconnect. Use "off" to keep it running.
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0
 
-# "/" returns 200 (the login page) once Dewey is up.
-[[http_service.checks]]
-  grace_period = "60s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/"
+# The MCP endpoint answers 401 without the token and Fly's HTTP checks expect a
+# 2xx, so check that the port accepts connections instead.
+[checks]
+  [checks.mcp_port]
+    type = "tcp"
+    port = 8765
+    grace_period = "60s"
+    interval = "30s"
+    timeout = "5s"
 
 [[vm]]
   memory = "1gb"   # a guess for the anthropic/azure stacks: raise it if Dewey runs out of memory;

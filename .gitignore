@@ -222,6 +222,3 @@ __marimo__/
 data/*.json
 # Backups written by install.py (contain secrets)
 .env.bak-*
-# Dewey login accounts (password hashes); see app/manage_users.py
-users.txt
-.users-*.tmp

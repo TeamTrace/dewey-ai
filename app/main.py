@@ -1,29 +1,32 @@
 """
-Dewey's web UI.
+Dewey's demo chat page (Gradio), for trying Dewey on your own computer.
 
     python app/main.py
 
-By default Dewey listens on 127.0.0.1, which only this computer can reach.
-To let colleagues use it, add accounts with `python app/manage_users.py add
-NAME`, listen on the network (GRADIO_SERVER_NAME=0.0.0.0) and put HTTPS in
-front; see docs/DEPLOYMENT.md. Dewey refuses to listen on a network address
-with no accounts unless DEWEY_ALLOW_NO_AUTH=true, which is only for
-deployments behind a single-sign-on proxy that already checks who people are.
+Dewey's main interface is its MCP server (app/mcp_server.py, docs/MCP.md): agent
+tools and chat apps such as Open WebUI and LibreChat connect to that. This page is
+a localhost demo with no login, so it listens on 127.0.0.1 (this computer only)
+and refuses any other address unless one of these says it is safe:
+
+  DEWEY_DEMO_BEHIND_AUTH_PROXY=true      a proxy in front of the page makes people
+                                         sign in (single sign-on) and nothing else
+                                         can reach this port
+  DEWEY_DEMO_PUBLISHED_ON_LOOPBACK=true  in a container whose port Docker publishes
+                                         on the host's 127.0.0.1 only. The "demo"
+                                         service in docker-compose.yml sets it; the
+                                         refusal message doesn't offer it, because
+                                         set on a bare host it exposes the page
 
 Settings (environment or .env):
   GRADIO_SERVER_NAME   address to listen on (default 127.0.0.1)
   GRADIO_SERVER_PORT   port (default: PORT if set, else the first free port from 7860)
   PORT                 used when GRADIO_SERVER_PORT is unset; Render and similar platforms set it
-  DEWEY_USERS_FILE     accounts file (default: users.txt in the repo root)
-  DEWEY_USERS          accounts in one value, separated by commas (instead of the file)
-  DEWEY_ALLOW_NO_AUTH  true: allow no accounts on a network address (SSO proxy only)
-  DEWEY_AUTH_MESSAGE   text shown on the login page
   DEWEY_CONCURRENCY    how many questions are answered at the same time (default 4)
 
-Telemetry, the API docs page, the /monitoring pages, MCP, share links and file
-uploads over 1 MB are always off. Without accounts on 127.0.0.1, only requests
-addressed to localhost/127.0.0.1 are answered (DNS rebinding); over HTTPS,
-Gradio's non-Secure copy of the login cookie is dropped (see RequestGuard).
+Telemetry, the API docs page, the /monitoring pages, Gradio's MCP server, share
+links and file uploads over 1 MB are always off. Unless DEWEY_DEMO_BEHIND_AUTH_PROXY
+is set, only requests addressed to localhost/127.0.0.1 are answered (DNS rebinding;
+see RequestGuard).
 """
 from __future__ import annotations
 
@@ -36,14 +39,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-import auth
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_CONCURRENCY = 4
 MAX_CONCURRENCY = 100
 MAX_UPLOAD = "1mb"  # Dewey has no upload fields; this caps Gradio's generic /upload route
 EXIT_CONFIG_ERROR = 2
+
+BEHIND_PROXY_ENV = "DEWEY_DEMO_BEHIND_AUTH_PROXY"
+PUBLISHED_ON_LOOPBACK_ENV = "DEWEY_DEMO_PUBLISHED_ON_LOOPBACK"
 
 _TRUE = ("1", "true", "yes", "on")
 _FALSE = ("", "0", "false", "no", "off")
@@ -119,7 +123,7 @@ _PORT_SUFFIX_RE = re.compile(r"(?::[0-9]{1,5})?")
 def loopback_host_header(value: str) -> bool:
     """True when an HTTP Host header names this computer: localhost, *.localhost
     or a loopback IP address, with an optional :port. Anything else (including
-    0.0.0.0) is refused in local no-login mode."""
+    0.0.0.0) is refused unless the demo is behind an access-controlling proxy."""
     host = value.strip().lower()
     if host.startswith("["):
         name, bracket, rest = host[1:].partition("]")
@@ -139,9 +143,9 @@ def loopback_host_header(value: str) -> bool:
 
 
 WRONG_HOST_MESSAGE = (
-    "Dewey is running on this computer without login, so it only answers requests addressed to "
-    "localhost or 127.0.0.1. Open it at http://127.0.0.1:<port>/ instead. (This stops web pages "
-    "from reaching it through DNS rebinding.) Behind a reverse proxy, see docs/DEPLOYMENT.md.\n"
+    "Dewey's demo page has no login, so it only answers requests addressed to localhost or "
+    "127.0.0.1. Open it at http://127.0.0.1:<port>/ instead. (This stops web pages from reaching "
+    f"it through DNS rebinding.) Behind a sign-in proxy, see {BEHIND_PROXY_ENV} in docs/DEPLOYMENT.md.\n"
 )
 
 
@@ -149,15 +153,15 @@ class RequestGuard:
     """ASGI middleware in front of Gradio's routes.
 
     - Always: 404 for /monitoring and /monitoring/*. Gradio 5.44.1 serves
-      /monitoring/summary (request counts and timings per function) with no login
-      check, even with enable_monitoring=False.
-    - loopback_only (local, no login): 400 unless the Host header is a loopback
-      name. Without it, a web page the person visits can point its own host name
-      at 127.0.0.1 (DNS rebinding) and use Dewey as if it were same-origin.
-    - Over HTTPS: drops Gradio's non-Secure copy of the login cookie.
+      /monitoring/summary (request counts and timings per function) even with
+      enable_monitoring=False.
+    - loopback_only (everything except DEWEY_DEMO_BEHIND_AUTH_PROXY): 400 unless
+      the Host header is a loopback name. Without it, a web page the person visits
+      can point its own host name at 127.0.0.1 (DNS rebinding) and use the demo as
+      if it were same-origin.
     """
 
-    def __init__(self, app, loopback_only: bool = False):
+    def __init__(self, app, loopback_only: bool = True):
         self.app = app
         self.loopback_only = loopback_only
 
@@ -172,8 +176,6 @@ class RequestGuard:
                 if host is None or not loopback_host_header(host.decode("latin-1")):
                     await self._refuse(scope, send, 400, WRONG_HOST_MESSAGE)
                     return
-            if scope["type"] == "http" and _is_https(scope):
-                send = _without_plaintext_session_cookie(send)
         await self.app(scope, receive, send)
 
     @staticmethod
@@ -191,80 +193,53 @@ class RequestGuard:
         await send({"type": "http.response.body", "body": body})
 
 
-def _is_https(scope) -> bool:
-    """The browser used HTTPS: TLS here, or a proxy says so in X-Forwarded-Proto.
-    A client can fake the header, but faking it only drops its own cookie copy."""
-    if scope.get("scheme") == "https":
-        return True
-    proto = next((v for k, v in scope.get("headers") or [] if k == b"x-forwarded-proto"), b"")
-    return proto.split(b",")[0].strip().lower() == b"https"
-
-
-_PLAINTEXT_COOKIE = b"access-token-unsecure-"
-
-
-def _without_plaintext_session_cookie(send):
-    """Gradio 5.44.1 sets the login token twice: access-token-<id> (Secure) and
-    access-token-unsecure-<id> (no Secure flag, for plain-HTTP use). Over HTTPS
-    the second copy would be sent in clear text on any visit to the http://
-    address, so drop it; Gradio reads the Secure one first."""
-    async def wrapped(message):
-        if message["type"] == "http.response.start":
-            headers = [(k, v) for k, v in message.get("headers", [])
-                       if not (k.lower() == b"set-cookie" and v.lstrip().startswith(_PLAINTEXT_COOKIE))]
-            message = {**message, "headers": headers}
-        await send(message)
-    return wrapped
-
-
 def request_guard_middleware(loopback_only: bool):
     from starlette.middleware import Middleware  # installed with Gradio; imported lazily like gradio
 
     return Middleware(RequestGuard, loopback_only=loopback_only)
 
 
-def check_exposure(host: str, user_count: int, allow_no_auth: bool) -> None:
-    """Refuse to serve the network with no login, unless explicitly allowed."""
-    if user_count or allow_no_auth or is_loopback(host):
+def check_exposure(host: str, behind_proxy: bool, published_on_loopback: bool) -> None:
+    """The demo has no login: refuse a network address unless a setting says access is controlled."""
+    if is_loopback(host) or behind_proxy or published_on_loopback:
         return
+    # PUBLISHED_ON_LOOPBACK_ENV is deliberately not offered below: the Compose demo service sets
+    # it. Set by hand on a machine's own network address, it would put the page on the network:
+    # the Host check only stops browsers (DNS rebinding), not a direct request.
     raise StartupError(
-        f"Refusing to start: GRADIO_SERVER_NAME={host} lets other machines reach Dewey, but no login "
-        "accounts are set up, so anyone who can reach it could use it (and your API keys).\n"
+        f"Refusing to start: GRADIO_SERVER_NAME={host} lets other machines reach the demo page. It has "
+        "no login, so anyone who can reach it could search the archive and ask questions on your API keys.\n"
         "Do one of these:\n"
-        "  - add an account:  python app/manage_users.py add NAME   (then start Dewey again)\n"
         "  - listen on this computer only: unset GRADIO_SERVER_NAME (the default is 127.0.0.1)\n"
-        "  - only if a single-sign-on proxy in front of Dewey already checks who people are:\n"
-        "    set DEWEY_ALLOW_NO_AUTH=true\n"
+        "  - for colleagues and AI tools, run the MCP server instead (python app/mcp_server.py --http,\n"
+        "    which requires a token; see docs/MCP.md)\n"
+        "  - only if a proxy in front of the demo makes people sign in (single sign-on) and nothing\n"
+        f"    else can reach this port: set {BEHIND_PROXY_ENV}=true\n"
+        "  - in Docker, use docker compose --profile demo up, which publishes the page on the host's\n"
+        "    127.0.0.1 only and sets what it needs itself\n"
         "See docs/DEPLOYMENT.md."
     )
 
 
-def build_launch_plan(env: Mapping[str, str], repo_root: Path = REPO_ROOT) -> LaunchPlan:
+def build_launch_plan(env: Mapping[str, str]) -> LaunchPlan:
     """Work out Gradio's launch()/queue() settings from the environment, without
     starting anything. Raises StartupError for settings Dewey must not run with."""
     host, port, warnings = server_address(env)
-    allow_no_auth = env_flag(env, "DEWEY_ALLOW_NO_AUTH")
+    behind_proxy = env_flag(env, BEHIND_PROXY_ENV)
+    published_on_loopback = env_flag(env, PUBLISHED_ON_LOOPBACK_ENV)
     concurrency = env_int(env, "DEWEY_CONCURRENCY", 1, MAX_CONCURRENCY) or DEFAULT_CONCURRENCY
-    try:
-        store = auth.load_user_store(env, repo_root=repo_root, warn=warnings.append)
-    except auth.UsersConfigError as e:
-        raise StartupError(str(e)) from None
-    user_count = len(store) if store is not None else 0
-    check_exposure(host, user_count, allow_no_auth)
+    check_exposure(host, behind_proxy, published_on_loopback)
 
-    login: Optional[Callable[[str, str], bool]] = store.verify if store is not None and user_count else None
-    # Local with no login: only answer requests addressed to localhost (DNS rebinding).
-    # Not with DEWEY_ALLOW_NO_AUTH, where an SSO proxy may forward its own Host header.
-    loopback_only = login is None and is_loopback(host) and not allow_no_auth
+    # Only answer requests addressed to localhost (DNS rebinding), except behind a
+    # sign-in proxy, which may forward its own public Host header.
+    loopback_only = not behind_proxy
     launch_kwargs: Dict[str, Any] = {
         "server_name": host,
         "server_port": port,
-        "auth": login,
-        "auth_message": env.get("DEWEY_AUTH_MESSAGE", "").strip() or None,
         "share": False,
         "show_api": False,
         "enable_monitoring": False,
-        "mcp_server": False,
+        "mcp_server": False,  # Gradio's own MCP server; Dewey's is app/mcp_server.py
         "max_file_size": MAX_UPLOAD,
         "app_kwargs": {"middleware": [request_guard_middleware(loopback_only)]},
     }
@@ -273,22 +248,23 @@ def build_launch_plan(env: Mapping[str, str], repo_root: Path = REPO_ROOT) -> La
     where = f"{host}:{port}" if port is not None else f"{host}, first free port from 7860"
     reach = "this computer only" if is_loopback(host) else "reachable from other machines"
     summary = [f"Listening on {where} ({reach})."]
-    if login is not None:
-        summary.append(f"Login required: {user_count} account(s) from {store.source}.")
-        if allow_no_auth:
-            summary.append("DEWEY_ALLOW_NO_AUTH is ignored because accounts are set up.")
-    elif is_loopback(host):
-        empty = f" ({store.source} has no accounts)" if store is not None else ""
-        summary.append(f"Login: off{empty}. Only this computer can reach Dewey.")
-        if loopback_only:
-            summary.append("Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding).")
-    else:
+    if behind_proxy:
         summary.append(
-            "Login: OFF (DEWEY_ALLOW_NO_AUTH=true). Anyone who can reach this address can use Dewey. "
-            "Run this way only behind a single-sign-on proxy, with this port closed to everything else."
+            f"Demo page, no login ({BEHIND_PROXY_ENV}=true): the proxy in front must make people sign "
+            "in, and nothing else may be able to reach this port."
         )
+    elif not is_loopback(host):
+        summary.append(
+            f"Demo page, no login ({PUBLISHED_ON_LOOPBACK_ENV}=true): Docker must publish this port on "
+            "the host's 127.0.0.1 only."
+        )
+    else:
+        summary.append("Demo page, no login. Only this computer can reach it.")
+    if loopback_only:
+        summary.append("Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding).")
     summary.append(f"Answers up to {concurrency} question(s) at once (DEWEY_CONCURRENCY).")
-    summary.append("Telemetry, API page, /monitoring, MCP and share links: off.")
+    summary.append("Telemetry, API page, /monitoring, Gradio's MCP server and share links: off.")
+    summary.append("For colleagues and AI tools, use Dewey's MCP server instead: docs/MCP.md.")
     return LaunchPlan(launch_kwargs, queue_kwargs, summary, warnings)
 
 

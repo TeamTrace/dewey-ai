@@ -6,8 +6,6 @@
 .env
 .env.*
 !.env.template
-users.txt
-**/users.txt
 .venv
 venv
 **/__pycache__

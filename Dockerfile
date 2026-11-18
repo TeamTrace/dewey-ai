@@ -1,11 +1,13 @@
-# Dewey web app image. See docs/DEPLOYMENT.md.
+# Dewey image. By default it runs the MCP server; the same image also runs the
+# indexer (app/setup_postgres.py) and the localhost demo page (app/main.py).
+# See docs/DEPLOYMENT.md.
 #
 #   docker build -t dewey .                                        # azure / anthropic stacks
 #   docker build -t dewey --build-arg INSTALL_LOCAL_MODELS=true .  # adds local embedding/reranking models
 #
-# The image holds no secrets and no articles: configuration comes from
-# environment variables at run time, and articles are indexed into Postgres
-# with app/setup_postgres.py (see docker-compose.yml).
+# The image holds no secrets and no articles: configuration (including
+# DEWEY_MCP_TOKEN) comes from environment variables at run time, and articles
+# are indexed into Postgres with app/setup_postgres.py (see docker-compose.yml).
 FROM python:3.12-slim
 
 # true: also install CPU-only PyTorch and requirements-local.txt, for
@@ -15,12 +17,9 @@ ARG INSTALL_LOCAL_MODELS=false
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    GRADIO_SERVER_NAME=0.0.0.0 \
-    GRADIO_SERVER_PORT=7860 \
     GRADIO_ANALYTICS_ENABLED=False
 
-# Unprivileged user with a fixed id (1000), so a bind-mounted users.txt can be
-# made readable to it on the host.
+# Unprivileged user with a fixed id (1000).
 RUN groupadd --gid 1000 dewey \
     && useradd --uid 1000 --gid dewey --create-home --home-dir /home/dewey --shell /usr/sbin/nologin dewey
 
@@ -42,10 +41,16 @@ RUN mkdir -p /app/data /home/dewey/.cache/huggingface \
 
 USER dewey
 
-EXPOSE 7860
+EXPOSE 8765
 
-# "/" answers 200 (the chat page, or the login page when accounts are set up).
+# Checks that the default command's port accepts connections. (The MCP endpoint
+# answers 401 without the token, so there is no page to fetch.) Another command,
+# such as the demo page, needs its own check; docker-compose.yml sets one.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD python -c "import os, urllib.request; port = os.environ.get('GRADIO_SERVER_PORT') or os.environ.get('PORT') or '7860'; urllib.request.urlopen('http://127.0.0.1:' + port + '/', timeout=4)"
+    CMD python -c "import socket; socket.create_connection(('127.0.0.1', 8765), timeout=4).close()"
 
-CMD ["python", "app/main.py"]
+# The MCP server over Streamable HTTP at http://<container>:8765/mcp. It refuses
+# to start without DEWEY_MCP_TOKEN (32+ characters). It listens on all of the
+# container's interfaces, so publish the port only where you mean to, and put
+# TLS in front of it for anything beyond one machine (docs/DEPLOYMENT.md).
+CMD ["python", "app/mcp_server.py", "--http", "--host", "0.0.0.0", "--port", "8765"]

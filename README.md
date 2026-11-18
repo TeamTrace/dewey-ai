@@ -7,6 +7,16 @@ Dewey is an AI-powered librarian designed to help newsrooms make their archives 
 
 Archival research methods are cumbersome. Often times, they rely on keyword searches and date range filtering, making it difficult to surface topics without specific preexisting knowledge. Moreover, archives can live across disparate source systems/databases because of how content management systems evolve over time. Unifying these systems with a state-of-the-art search engine hopes to make archive research easier and more efficient for reporters.
 
+### How this version works
+
+This fork turns Dewey into a **newsroom archive engine** that the AI tools your newsroom already uses can search:
+
+1. **Import** articles from your CMS (WordPress, RSS/Atom, CSV, Drupal, Ghost) into `data/*.json`: `python3 app/import_archive.py --help`.
+2. **Index** them into Postgres with pgvector (or Azure AI Search): `python app/setup_postgres.py`.
+3. **Search** them over [MCP](docs/MCP.md): agent harnesses (Hermes Agent, DeepSeek Harness, Claude Code) and chat apps (Open WebUI, LibreChat, Claude Desktop) connect to `app/mcp_server.py` and get article excerpts with URLs, filtered by publish date and byline.
+
+Dewey has **no login system and no chat product of its own**: people use the app they already have, and access is controlled with the MCP server's bearer token, TLS and network placement ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)). `app/main.py` is a small demo chat page for trying Dewey on your own computer; it refuses to listen on a network address unless you say a sign-in proxy is in front of it.
+
 
 ## Acknowledgements
 Special thank you to the [Lenfest Institute AI Collaborative and Fellowship Program](https://www.lenfestinstitute.org/institute-news/lenfest-institute-openai-microsoft-ai-collaborative-fellowship/) for making this project happen.
@@ -61,6 +71,8 @@ Dewey runs on one of three interchangeable stacks, selected with `DEWEY_STACK` i
 | Indexing | `app/setup.py` (Blob Storage + Azure indexer) | `app/setup_postgres.py` (runs locally) | same as `anthropic` |
 | Paid accounts needed | Azure | Anthropic, Voyage AI | none |
 
+The "search planning" and "cited answer" rows are for the `ask_archive` tool and the demo page. With the recommended `search_archive` tool, Dewey calls no chat model: the client's own model reads the excerpts and writes the answer, and only the embedding, search and reranking rows apply.
+
 On the two Postgres stacks, embeddings and reranking can be mixed and matched with `EMBEDDING_PROVIDER` (`voyage` | `local`) and `RERANK_PROVIDER` (`voyage` | `local` | `none`). For example, `DEWEY_STACK="anthropic"` with both set to `local` uses Claude for answers and no Voyage account.
 
 Anthropic does not offer an embedding model; its documentation points to Voyage AI ([Anthropic embeddings guide](https://platform.claude.com/docs/en/build-with-claude/embeddings)). Indexes are **not** portable between embedding models: vectors from different models can't be compared, so changing `EMBEDDING_PROVIDER`, `EMBED_MODEL` or `EMBED_DIM` means indexing into a fresh database. Dewey records which model built each database and refuses to search it with a different one.
@@ -73,7 +85,7 @@ Anthropic does not offer an embedding model; its documentation points to Voyage 
    python app/setup_postgres.py
    ```
    This creates the tables and indexes, splits each article into ~380-word chunks with ~70-word overlap (an approximation of the Azure path's 512-token/96-token split), embeds them, and stores them. Re-running it updates articles in place (and embeds every article in `data/` again; it never removes articles from the database).
-3. Launch Dewey: `python app/main.py`.
+3. Try it on the demo page, `python app/main.py`, then [connect your AI tools](#connect-your-ai-tools-mcp).
 
 ### Running on the `anthropic` stack
 
@@ -245,16 +257,20 @@ This will:
 - Upload documents to blob storage
 - Process documents through AI Search pipeline
 
-3. Launch Dewey
+3. Try it on the demo page
 ```bash
-python main.py
+python app/main.py
 ```
-The application will be available at `http://localhost:7860`. This project uses Gradio to create a user-friendly web interface for our machine learning model. You can learn more about Gradio at https://www.gradio.app/.
+Then [connect your AI tools](#connect-your-ai-tools-mcp).
 
 
 ## Usage
 
-1. **Open your browser** to `http://localhost:7860`
+### The demo page
+
+`python app/main.py` serves a demo chat page at `http://127.0.0.1:7860` (made with [Gradio](https://www.gradio.app/)). It has no login, so it only listens on your own computer; to share Dewey, connect a chat app or agent to the MCP server instead.
+
+1. **Open your browser** to `http://127.0.0.1:7860`
 2. **Ask questions** in natural language:
     - "What articles did *author X* about the election last month?"
     - "Summarize the last decade of coverage on *topic X*."
@@ -264,34 +280,33 @@ The application will be available at `http://localhost:7860`. This project uses 
 Bylines: on the `anthropic` and `open` stacks, an author filter ignores capitals and extra spaces ("jane doe" finds "Jane Doe"), but it needs the whole name as the byline has it ("Doe" alone finds nothing). In a Postgres database created with the plain `C` locale, only the letters A-Z are matched regardless of case, so "JOSÉ" won't find "José" there. The `azure` stack matches names exactly. Articles imported without a byline are never found by an author filter.
 
 
-## Deploying Dewey
+## Connect your AI tools (MCP)
 
-`python app/main.py` serves Dewey at `http://127.0.0.1:7860`, which only your own computer can reach. To let colleagues use it:
+`app/mcp_server.py` lets AI tools that support MCP search the archive while they work. It has two tools:
 
-1. **Create login accounts:** `python app/manage_users.py add NAME`. Passwords are stored as salted hashes in `users.txt`, which git ignores.
-2. **Run it on a server:** the repo has a `Dockerfile`, a `docker-compose.yml` (Dewey + Postgres/pgvector, optional Ollama), and Fly.io and Render examples in `deploy/`.
-3. **Put HTTPS in front of it.**
+- `search_archive` (**recommended**): returns matching article excerpts with their URLs, filtered by `start_date`/`end_date` and exact bylines (`authors`). It calls no language model; the client brings its own.
+- `ask_archive` (optional): runs Dewey's full pipeline and returns a cited answer. On paid stacks, each call costs the same as a question on the demo page.
 
-Dewey refuses to listen on a network address without accounts, unless `DEWEY_ALLOW_NO_AUTH=true` (only for setups behind a single-sign-on proxy). It always turns off Gradio's telemetry, API page, monitoring page and share links.
-
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has step-by-step guides, a comparison of hosting options (including why Netlify and Hugging Face Spaces don't fit), and a security checklist.
-
-
-## Use Dewey from AI agents (MCP)
-
-`app/mcp_server.py` lets AI agents that support MCP (Hermes Agent, Claude Code, Claude Desktop and
-others) search the archive while they work. It has two tools: `search_archive` returns matching article
-excerpts with their URLs and calls no language model, and `ask_archive` runs Dewey's full pipeline and
-returns a cited answer (on paid stacks, each call costs the same as a question in the web app). It uses
-the same `.env` and index as the web app, on any stack.
+It uses the same `.env` and index as the demo page, on any stack.
 
 ```bash
-python app/mcp_server.py           # stdio: the agent starts this itself (most setups)
-python app/mcp_server.py --http    # one shared server; requires DEWEY_MCP_TOKEN
+python app/mcp_server.py           # stdio: the agent starts this itself (agents on the same computer)
+python app/mcp_server.py --http    # one shared server (chat apps, other machines); requires DEWEY_MCP_TOKEN
 ```
 
-See [docs/MCP.md](docs/MCP.md) for agent configuration, the HTTP token setup, and security notes.
-Article text the tools return is untrusted input to the agent.
+[docs/MCP.md](docs/MCP.md) has setup recipes for Hermes Agent, DeepSeek Harness, Open WebUI, LibreChat, Claude Code and Claude Desktop, a "test it works" checklist, and security notes. Article text the tools return is untrusted input to the agent.
+
+
+## Deploying Dewey
+
+For a team, run the MCP server and Postgres on a server:
+
+1. **Configure:** in `.env`, set your stack's keys, `POSTGRES_PASSWORD` and `DEWEY_MCP_TOKEN` (a random token of 32+ characters that clients send as `Authorization: Bearer ...`).
+2. **Start:** `docker compose up -d --build` runs the MCP server (published on the server's `127.0.0.1:8765` only; this needs Docker Engine 28.0 or newer, see the guide) and Postgres/pgvector (never published). Optional profiles add the demo page (`--profile demo`, localhost only) and an Ollama model server (`--profile ollama`).
+3. **Index:** `docker compose run --rm -v ./data:/app/data:ro dewey python app/setup_postgres.py`.
+4. **Connect:** chat apps in Docker join the `dewey-mcp-clients` network; clients on other machines go through an HTTPS reverse proxy.
+
+There are also Fly.io and Render examples in `deploy/`. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has step-by-step guides, access control (token, TLS, never exposing Postgres), a comparison of hosting options (including why Netlify and Hugging Face Spaces don't fit), and a security checklist.
 
 
 ## Contributing
