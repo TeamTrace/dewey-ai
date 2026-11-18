@@ -91,11 +91,20 @@ Anthropic does not offer an embedding model; its documentation points to Voyage 
 
 1. Get credentials:
    - `ANTHROPIC_API_KEY`: from the Claude Console.
-   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB). Not needed if you set `EMBEDDING_PROVIDER` and `RERANK_PROVIDER` to `local` or `none` (see the next section for the local setup).
+   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB). Before indexing, check the Atlas organization's Voyage AI data-collection setting (see [What the hosted providers receive](#what-the-hosted-providers-receive)). Not needed if you set `EMBEDDING_PROVIDER` and `RERANK_PROVIDER` to `local` or `none` (see [Running fully open source](#running-fully-open-source-open-stack) for the local setup).
 2. In `.env`, set `DEWEY_STACK="anthropic"`, `DATABASE_URL`, and the keys above. Optionally set `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION`.
 3. Follow the common setup above.
 
 Model and cost notes: both Claude steps default to `claude-opus-5-5`. The search-planning step runs at `low` effort and the answer at `medium`; override them with `ANTHROPIC_MODEL`, `ANTHROPIC_METADATA_EFFORT` and `ANTHROPIC_ANSWER_EFFORT`. Requests opt into Anthropic's server-side refusal fallback: if a safety classifier declines a request, the API retries it on a fallback model in the same call. If the whole chain declines, Dewey says so in the answer instead of failing silently.
+
+### What the hosted providers receive
+
+Every question a journalist asks leaves your network, and some questions are sensitive (for example, ones that name a confidential source). Check each provider's data-use and retention terms, and the settings you control, before you open Dewey to reporters. The notes below were not verified against the providers' current terms; the linked pages are the authority.
+
+- **Voyage AI (MongoDB Atlas)**, `anthropic` stack: receives every question (as the search query and as the rerank query), the candidate article excerpts sent for reranking and, at indexing time, the whole archive. MongoDB documents that it can collect data sent to the Atlas Embedding and Reranking API and use it to improve Voyage AI models, controlled per organization in Atlas **Organization Settings**. See [Model training data](https://www.mongodb.com/docs/voyageai/management/model-training-data/) and turn data collection off there if you don't want this. The default for a new organization is not verified here.
+- **Anthropic (Claude)**, `anthropic` stack: receives the conversation and the retrieved article text. Retention and use are set by your Anthropic API terms; check them, and any zero-data-retention arrangement your organization has, in the Claude Console.
+- **Azure OpenAI and Azure AI Search**, `azure` stack: receive the conversation, the search query and the retrieved article text. Azure OpenAI's abuse monitoring can keep prompts and outputs for a limited time unless Microsoft has approved your organization for modified abuse monitoring; see Microsoft's "Data, privacy, and security for Azure OpenAI" documentation.
+- **A hosted OpenAI-compatible server**, `open` stack with `OPEN_LLM_BASE_URL` pointing at another company's service: receives the conversation and the retrieved article text, under that service's terms. For OpenRouter, Dewey asks per request for providers that don't collect data and for zero data retention (`OPENROUTER_PRIVACY`, see [docs/MODELS.md](docs/MODELS.md)); your OpenRouter account's privacy settings also apply. With a model server you run yourself and `local`/`none` embeddings and reranking, questions and articles stay on your own machines.
 
 ### Running fully open source (`open` stack)
 
@@ -105,7 +114,7 @@ Every component runs on hardware you control, with no accounts or API keys:
 |---|---|---|
 | Chat model | Any open-weight model on an OpenAI-compatible server. Examples: [Qwen3-8B](https://hf.co/Qwen/Qwen3-8B) (8B parameters), [gpt-oss-20b](https://hf.co/openai/gpt-oss-20b) (21B parameters) | Apache 2.0 (both examples) |
 | Model server | [Ollama](https://github.com/ollama/ollama) (default), or vLLM / llama.cpp's server | MIT (Ollama) |
-| Embeddings | [voyage-4-nano](https://hf.co/MongoDB/voyage-4-nano), 347M parameters, run via the `voyageai` SDK's local mode | Apache 2.0 |
+| Embeddings | [voyage-4-nano](https://hf.co/MongoDB/voyage-4-nano), 347M parameters, run via sentence-transformers the way the `voyageai` SDK's local mode runs it | Apache 2.0 |
 | Reranker | [bge-reranker-v2-m3](https://hf.co/BAAI/bge-reranker-v2-m3), 568M parameters, run via sentence-transformers | Apache 2.0 |
 | Database | PostgreSQL + [pgvector](https://github.com/pgvector/pgvector) | PostgreSQL License (Postgres); see the pgvector repo |
 | Python libraries | gradio, openai (client only), voyageai, sentence-transformers, psycopg, pgvector, pydantic | Apache 2.0 / MIT / BSD, except psycopg (LGPL-3.0) |
@@ -137,7 +146,9 @@ Steps:
    DATABASE_URL="postgresql://user:password@localhost:5432/dewey"
    NEWSROOM_NAME="Your Newsroom"      # optional, see .env.template
    ```
-4. **Follow the common setup above.** The first run of `app/setup_postgres.py` downloads the embedding model (and the first question downloads the reranker) from Hugging Face into `~/.cache/huggingface`. After that, everything runs offline except for reaching your own Postgres and model server.
+4. **Follow the common setup above.** The first run of `app/setup_postgres.py` downloads the embedding model (and the first question downloads the reranker) from Hugging Face into `~/.cache/huggingface`. After that, Dewey loads both from that cache at the version first downloaded and doesn't check Hugging Face for a newer one, so it needs no network except to reach your own Postgres and model server.
+
+   voyage-4-nano's repository includes Python code that runs when the model loads (Hugging Face's `trust_remote_code`), inside the process that holds your keys and sees every question. That is why Dewey never updates it on its own. To choose the version yourself, set `EMBED_MODEL_REVISION` (and `RERANK_MODEL_REVISION` for the reranker) in `.env` to a commit hash from the model's Hugging Face page whose files you have reviewed. To update, set a newer commit, or delete the model from the cache. To rule out any request to Hugging Face once the models are downloaded, also set `HF_HUB_OFFLINE=1` in the environment that starts Dewey (not in `.env`: it is read before `.env` is loaded). `EMBEDDING_PROVIDER=local` only ever runs voyage-4-nano; Dewey refuses to start if `EMBED_MODEL` names a hosted Voyage model, rather than send questions to Voyage AI.
 
 What to expect, honestly:
 - **Answer quality** depends mostly on the chat model. Small local models are more likely than Claude or GPT-class models to miss a citation, cite the wrong source, or ignore the "say you can't answer" rule. Check citations against the linked articles before relying on an answer.

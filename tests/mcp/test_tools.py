@@ -201,6 +201,14 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(all("Jane Doe" in s["authors"] for s in structured["sources"]))
         self.assertEqual(len(structured["sources"]), 2)
 
+    def test_source_urls_are_safe_link_targets(self):
+        raw = [json.dumps({"url": u, "headline": "h", "content": "c", "authors": [], "publish_date": "2024-01-01"})
+               for u in ["https://news.example/a)![](https://tracker.example/p.gif", "javascript:alert(1)",
+                         "https://news.example/plain", ""]]
+        urls = [s.url for s in mcp_server.to_sources(raw)]
+        self.assertEqual(urls, ["https://news.example/a%29![]%28https://tracker.example/p.gif", "#",
+                                "https://news.example/plain", ""])
+
     def test_ask_archive_with_no_sources(self):
         (_, structured), _, _ = self.call(make_server(), "ask_archive", {"question": "nothing at all"})
         self.assertEqual(structured["sources"], [])

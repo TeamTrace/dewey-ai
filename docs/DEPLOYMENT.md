@@ -114,13 +114,13 @@ trying Dewey on your own computer. It has **no login**, so:
   answers.
 - **Always off:** Gradio's usage telemetry, the "Use via API" page, the `/monitoring` pages, Gradio's
   own MCP server and public share links. Gradio's REST routes can't skip the queue, and the generic
-  upload route accepts at most 1 MB (Dewey has no upload fields). These are Gradio 5.44.1 options we
-  checked in its source. (Gradio 5.44.1 still serves `/monitoring/summary`, request counts and timings,
+  upload route accepts at most 1 MB (Dewey has no upload fields). These are Gradio 6.16.0 options we
+  checked in its source. (Gradio 6.16.0 still serves `/monitoring/summary`, request counts and timings,
   even with monitoring off, so Dewey answers 404 for every `/monitoring` path itself.)
-- **Not off:** Gradio 5.44.1's default theme loads a font from Google Fonts (`themes/default.py`, and
+- **Not off:** Gradio 6.16.0's default theme loads a font from Google Fonts (`themes/default.py`, and
   its page template preconnects to `fonts.googleapis.com`), so each browser that opens the page
   contacts Google. Questions and answers are not part of that request.
-- **Blocked:** Gradio 5.44.1's page template (`templates/frontend/index.html`) also loads a script,
+- **Blocked:** Gradio 6.16.0's page template (`templates/frontend/index.html`) also loads a script,
   iframe-resizer, from `cdnjs.cloudflare.com`, with no integrity check. A script runs inside the page,
   next to your questions and answers, so Dewey sends a `Content-Security-Policy: script-src 'self'
   'unsafe-inline'` header that lets the page run only scripts served by Dewey itself (the demo is never

@@ -55,7 +55,7 @@ class LaunchPlanTest(unittest.TestCase):
         self.assertIsNone(kw["server_port"])  # Gradio searches from 7860
         self.assertNotIn("auth", kw)  # no login system: the demo is for this computer
         self.assertIs(kw["share"], False)
-        self.assertIs(kw["show_api"], False)
+        self.assertEqual(kw["footer_links"], ["gradio", "settings"])
         self.assertIs(kw["enable_monitoring"], False)
         self.assertIs(kw["mcp_server"], False)
         self.assertEqual(kw["max_file_size"], "1mb")
@@ -300,7 +300,7 @@ class MainFunctionTest(unittest.TestCase):
         self.assertEqual(kwargs["server_name"], "0.0.0.0")
         self.assertEqual(kwargs["server_port"], 7999)
         self.assertNotIn("auth", kwargs)
-        self.assertIs(kwargs["show_api"], False)
+        self.assertEqual(kwargs["footer_links"], ["gradio", "settings"])
         self.assertIs(kwargs["enable_monitoring"], False)
         self.assertIs(kwargs["share"], False)
         self.assertIs(kwargs["mcp_server"], False)
@@ -433,7 +433,7 @@ class LocalDemoServerTest(unittest.TestCase):
         self.assertEqual(self.server.get("/config")[0], 200)
 
     def test_monitoring_is_not_served(self):
-        # Gradio 5.44.1 serves /monitoring/summary (per-function request counts and
+        # Gradio (5.44.1 and 6.16.0) serves /monitoring/summary (per-function request counts and
         # timings) even with enable_monitoring=False.
         for path in ["/monitoring", "/monitoring/summary"]:
             with self.subTest(path=path):
@@ -496,7 +496,7 @@ class LocalDemoServerTest(unittest.TestCase):
                 self.assertIn("https://example.com/a", stream)
 
     def test_page_may_run_only_its_own_scripts(self):
-        # Gradio 5.44.1's page template loads iframe-resizer from cdnjs.cloudflare.com, with no
+        # Gradio's page template (5.44.1 and 6.16.0) loads iframe-resizer from cdnjs.cloudflare.com, with no
         # integrity hash; the Content-Security-Policy keeps browsers from loading or running it.
         status, headers, body = raw_request(self.port, "GET", "/", {"Host": f"127.0.0.1:{self.port}"})
         self.assertEqual(status, 200)
@@ -511,7 +511,9 @@ class LocalDemoServerTest(unittest.TestCase):
         demo = self.server.demo
         self.assertIs(demo.analytics_enabled, False)
         self.assertIs(demo.api_open, False)
-        self.assertIs(demo.show_api, False)
+        self.assertEqual(demo.footer_links, ["gradio", "settings"])  # no "Use via API" link
+        self.assertTrue(demo.fns)
+        self.assertEqual({fn.api_visibility for fn in demo.fns.values()}, {"private"})
         self.assertEqual(demo.max_file_size, 1024 * 1024)
         self.assertEqual(demo._queue.default_concurrency_limit, 4)
 

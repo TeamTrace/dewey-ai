@@ -155,8 +155,10 @@ def build_pgvector_store():
             embed_provider,
             model=os.getenv("EMBED_MODEL") or None,
             dim=int(os.getenv("EMBED_DIM", DEFAULT_EMBED_DIM)),
+            revision=os.getenv("EMBED_MODEL_REVISION", "").strip() or None,
         )
-        reranker = make_reranker(rerank_provider, model=os.getenv("RERANK_MODEL") or None)
+        reranker = make_reranker(rerank_provider, model=os.getenv("RERANK_MODEL") or None,
+                                 revision=os.getenv("RERANK_MODEL_REVISION", "").strip() or None)
     except ValueError as e:
         raise StackConfigError(str(e)) from None
 

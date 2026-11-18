@@ -167,7 +167,7 @@ def same_origin(origin: Optional[str], host: str) -> bool:
         return False
 
 
-# Scripts only from Dewey's own address. Gradio 5.44.1's page template loads
+# Scripts only from Dewey's own address. Gradio's page template (checked in 6.16.0) loads
 # iframe-resizer from cdnjs.cloudflare.com (no integrity hash), which would run next to
 # the conversation; the demo is never embedded in another page, so it isn't needed.
 # 'unsafe-inline' is for the template's own inline scripts (the page config).
@@ -189,7 +189,7 @@ OTHER_ORIGIN_MESSAGE = (
 class RequestGuard:
     """ASGI middleware in front of Gradio's routes.
 
-    - Always: 404 for /monitoring and /monitoring/*. Gradio 5.44.1 serves
+    - Always: 404 for /monitoring and /monitoring/*. Gradio (checked in 6.16.0) serves
       /monitoring/summary (request counts and timings per function) even with
       enable_monitoring=False. Every response carries CONTENT_SECURITY_POLICY.
     - loopback_only (everything except DEWEY_DEMO_BEHIND_AUTH_PROXY): 400 unless
@@ -295,7 +295,9 @@ def build_launch_plan(env: Mapping[str, str]) -> LaunchPlan:
         "server_name": host,
         "server_port": port,
         "share": False,
-        "show_api": False,
+        # No "Use via API" link (Gradio 6 replaced show_api with footer_links and per-event
+        # api_visibility; build_ui marks every event private).
+        "footer_links": ["gradio", "settings"],
         "enable_monitoring": False,
         "mcp_server": False,  # Gradio's own MCP server; Dewey's is app/mcp_server.py
         "max_file_size": MAX_UPLOAD,
@@ -375,13 +377,19 @@ def build_ui(dewey):
         # Session state
         session_state = gr.State({"session_id": None, "user_data": {}})
 
-        chatbot = gr.Chatbot(type="messages", label="Dewey")
+        # Gradio 6 always uses the messages format (no `type`). `buttons=[]` and
+        # `allow_tags=False` keep Gradio 5's defaults: no share/copy buttons, and no
+        # custom HTML tags kept in rendered messages.
+        chatbot = gr.Chatbot(label="Dewey", buttons=[], allow_tags=False)
         msg = gr.Textbox(label="Message", placeholder="Ask your question here...")
         clear = gr.Button("Clear")
 
-        msg.submit(chat_with_dewey, [msg, chatbot, session_state], [chatbot, session_state])
-        msg.submit(lambda: "", None, [msg])
-        clear.click(lambda: [], None, [chatbot])
+        # api_visibility="private": left out of the API docs, so Gradio's client libraries don't
+        # offer them. This hides them; it doesn't lock them. RequestGuard and api_open=False do that.
+        msg.submit(chat_with_dewey, [msg, chatbot, session_state], [chatbot, session_state],
+                   api_visibility="private")
+        msg.submit(lambda: "", None, [msg], api_visibility="private")
+        clear.click(lambda: [], None, [chatbot], api_visibility="private")
     return demo
 
 
