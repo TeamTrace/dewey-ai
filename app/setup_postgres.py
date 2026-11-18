@@ -54,7 +54,7 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
 
 
 def main() -> None:
-    load_dotenv(REPO_ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env", interpolate=False)  # values are literal
     from providers import StackConfigError, build_pgvector_store, current_stack, retrieval_providers
 
     try:

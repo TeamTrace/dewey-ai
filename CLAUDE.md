@@ -20,6 +20,7 @@ Philadelphia Inquirer); this fork adds two non-Azure stacks, one of them fully o
 - `app/models/`: config dataclasses (`NewsroomConfig` reads `NEWSROOM_NAME`, `ARCHIVE_START_DATE`, `DEFAULT_REGION`) and the Pydantic `SearchMetadata` schema used for Claude structured outputs.
 - `app/setup.py` + `app/setup/`: Azure index, skillset and indexer setup. `app/setup_postgres.py`: Postgres schema and indexing.
 - `data/*.json`: articles to index (see README for the format).
+- `install.py` (repo root): interactive setup wizard that writes `.env`. Standard library only, because it runs before dependencies are installed. Its `SECTIONS` list must stay in sync with the settings read in `app/providers/__init__.py` and `app/models/core.py`.
 
 ## Conventions
 
@@ -30,6 +31,7 @@ Philadelphia Inquirer); this fork adds two non-Azure stacks, one of them fully o
 - Claude calls use `client.beta.messages.*` because they opt into server-side refusal fallbacks (`fallbacks="default"`, beta `server-side-fallback-2026-07-01`). Check `stop_reason == "refusal"` before using output. Don't use forced `tool_choice` with current Claude models (400); use structured outputs.
 - The embedding model/dimension is fixed per index and recorded in the `index_info` table; `PgVectorStore.check_index()` refuses a mismatch. Changing `EMBEDDING_PROVIDER`, `EMBED_MODEL` or `EMBED_DIM` requires a fresh database and a re-index.
 - `open_llm.py` must not assume the server enforces JSON schemas: it tries `json_schema`, falls back to `json_object`, strips `<think>` blocks and code fences, then validates with Pydantic.
+- `.env` is loaded with `load_dotenv(..., interpolate=False)` everywhere, so values are literal; `install.py` writes single-quoted values that python-dotenv reads back verbatim (requires python-dotenv >= 1.2 for values ending in a backslash).
 - Keep heavy local-model dependencies (torch, sentence-transformers) out of `requirements.txt`; they belong in `requirements-local.txt` and are imported lazily.
 
 ## Checks

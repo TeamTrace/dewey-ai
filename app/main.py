@@ -5,7 +5,8 @@ from models import NewsroomConfig
 from providers import build_stack
 import uuid
 
-load_dotenv()
+# interpolate=False: values are literal, so a password containing "${" is not expanded.
+load_dotenv(interpolate=False)
 
 # DEWEY_STACK=azure (default) or anthropic; see providers/__init__.py
 llm, retriever = build_stack(NewsroomConfig.from_env())

@@ -32,10 +32,18 @@ source .venv/bin/activate  # On Windows:
 .venv\Scripts\activate
 ```
 
-3. Install dependencies
+3. Run the setup wizard
 ```bash
-pip install -r requirements.txt
+python install.py
 ```
+The wizard asks which stack you want (see [Choosing a stack](#choosing-a-stack)), tells you where to create any account or key that stack needs (with an option to open each link), and asks for the credentials. Secrets are typed hidden. It then writes `.env` (readable only by you, with a backup of any previous one), and can optionally:
+- install the Python dependencies
+- check that your keys, database and model server work
+- index the articles in `data/`
+
+Re-run it any time to change a setting; your saved values are offered as defaults. `python install.py --dry-run` asks the same questions but only prints the result, with secrets masked.
+
+Prefer to configure by hand? Install dependencies with `pip install -r requirements.txt`, copy `.env.template` to `.env`, and follow the sections below.
 
 
 ## Choosing a stack
