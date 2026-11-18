@@ -409,14 +409,29 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn("Beta: tested against sample exports only", out)
         self.assertEqual(self.data_files(), [])
 
+    def env_token(self):
+        for line in (self.root / ".env").read_text().splitlines():
+            if line.startswith("DEWEY_MCP_TOKEN="):
+                return line.split("=", 1)[1].strip("'")
+        return None
+
     def test_skip_and_existing_json(self):
         out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
         self.assertEqual(status, 0, out)
         self.assertIn("python app/import_archive.py --help", out)
+        token = self.env_token()
+        self.assertIsNotNone(token)
+        self.assertGreaterEqual(len(token), 32)
+        self.assertNotIn(token, out)
+        self.assertIn("mcp_servers:", out)
         (self.root / "data" / "mine.json").write_text("[]")
-        out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "")])  # default: json
+        # The re-run finds the saved token and offers to keep it (default yes).
+        rerun = self.OPEN_STACK + [("Keep the existing MCP token", "")] + self.WRITE_ENV
+        out, status = self.wizard(rerun + [(self.WHERE, "")])  # default: json
         self.assertEqual(status, 0, out)
         self.assertIn("Using the 1 JSON file(s) already in data/.", out)
+        self.assertEqual(self.env_token(), token)
+        self.assertNotIn(token, out)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shlex
+import secrets
 import shutil
 import subprocess
 import sys
@@ -70,13 +71,14 @@ SECTIONS = [
     ("Open-weight chat model (DEWEY_STACK=open)", ["OPEN_LLM_BASE_URL", "OPEN_LLM_MODEL", "OPEN_LLM_API_KEY"]),
     ("Postgres + embeddings (anthropic and open stacks)",
      ["DATABASE_URL", "EMBEDDING_PROVIDER", "RERANK_PROVIDER", "VOYAGE_API_KEY"]),
+    ("MCP server (agent harnesses and chat UIs)", ["DEWEY_MCP_TOKEN"]),
     ("Azure (DEWEY_STACK=azure)", [
         "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "EMBEDDING_DEPLOYMENT_NAME", "EMBEDDING_MODEL_NAME",
         "CHATGPT_DEPLOYMENT_NAME", "CHATGPT_MODEL_NAME", "AZURE_SEARCH_ENDPOINT", "AZURE_SEARCH_API_KEY",
         "AZURE_SEARCH_INDEX_NAME", "AZURE_STORAGE_CONNECTION_STRING", "AZURE_STORAGE_CONTAINER_NAME",
     ]),
 ]
-SECRET_KEYS = {"ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "OPEN_LLM_API_KEY", "AZURE_OPENAI_API_KEY",
+SECRET_KEYS = {"ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "OPEN_LLM_API_KEY", "AZURE_OPENAI_API_KEY", "DEWEY_MCP_TOKEN",
                "AZURE_SEARCH_API_KEY", "AZURE_STORAGE_CONNECTION_STRING", "DATABASE_URL"}
 
 
@@ -1001,6 +1003,39 @@ def missing_required(values: dict) -> list:
 
 # ---------------------------------------------------------------- main
 
+MCP_MIN_TOKEN_CHARS = 32  # app/mcp_server.py MIN_TOKEN_CHARS
+
+
+def ask_mcp(cur: dict) -> dict:
+    heading("Connect AI tools (MCP)")
+    say("Dewey's MCP server lets agent harnesses (Hermes Agent, DeepSeek Harness, Claude Code) and")
+    say("chat apps (Open WebUI, LibreChat) search your archive. Over HTTP it requires a secret token,")
+    say("which is stored in .env and never printed here.")
+    existing = cur.get("DEWEY_MCP_TOKEN", "")
+    if len(existing) >= MCP_MIN_TOKEN_CHARS and ask_yes("Keep the existing MCP token?", default=True):
+        return {"DEWEY_MCP_TOKEN": existing}
+    if existing:
+        say("  Generating a new token: clients that used the old one will need the new value from .env.")
+    return {"DEWEY_MCP_TOKEN": secrets.token_urlsafe(32)}
+
+
+def print_mcp_next_steps() -> None:
+    py = sys.executable
+    server = ROOT / "app" / "mcp_server.py"
+    say("Connect an AI tool (full recipes for each client: docs/MCP.md):")
+    say("  On this computer (stdio), e.g. Hermes Agent's ~/.hermes/config.yaml:")
+    say("    mcp_servers:")
+    say("      dewey:")
+    say(f'        command: "{py}"')
+    say(f'        args: ["{server}"]')
+    say("        tools:")
+    say("          include: [search_archive]")
+    say("  Over HTTP (shared server):")
+    say(f"    {py} {server} --http        # listens on 127.0.0.1:8765")
+    say('    clients send  Authorization: Bearer <DEWEY_MCP_TOKEN from .env>  to http://127.0.0.1:8765/mcp')
+    say("  Put TLS in front before exposing it beyond this machine (docs/DEPLOYMENT.md).")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Interactive setup for Dewey.")
     parser.add_argument("--dry-run", action="store_true",
@@ -1036,6 +1071,7 @@ def main() -> int:
     if stack == "azure":
         values.update(ask_azure(current, interactive))
     values.update(ask_newsroom(current))
+    values.update(ask_mcp(current))
 
     # Write only non-empty answers (plus an explicit empty DEFAULT_REGION). Settings for
     # other stacks are dropped; unrelated keys already in .env are kept as they were.
@@ -1074,7 +1110,8 @@ def main() -> int:
         say(f"1. Fill in: {', '.join(missing)} (re-run python install.py)")
         if postgres_stack:
             say("2. Index your archive:  python app/setup_postgres.py")
-    say("Start Dewey:  python app/main.py   then open http://localhost:7860")
+    print_mcp_next_steps()
+    say("Optional demo page (this computer only):  python app/main.py   then open http://127.0.0.1:7860")
     say("Before relying on answers, ask questions you already know the answers to and check")
     say("each citation against the article it links to.")
     return 0
