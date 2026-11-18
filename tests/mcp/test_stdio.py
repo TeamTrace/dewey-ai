@@ -60,7 +60,9 @@ class StdioClientTest(unittest.IsolatedAsyncioTestCase):
 
                     result = await session.call_tool("search_archive", {"question": "explode"})
                     self.assertTrue(result.isError)
-                    self.assertIn("fake retriever failure", result.content[0].text)
+                    # The exception's text is logged on stderr, not sent to the client.
+                    self.assertNotIn("fake retriever failure", result.content[0].text)
+                    self.assertIn("problem on the Dewey server", result.content[0].text)
 
                     # Still serving after a failed call.
                     result = await session.call_tool("search_archive", {"question": "nothing"})
@@ -69,6 +71,9 @@ class StdioClientTest(unittest.IsolatedAsyncioTestCase):
             stderr = errlog.read()
         self.assertIn("FAKE test stack", stderr)
         self.assertIn(STRAY_STDOUT_MARKER, stderr)
+        # The failed call's details are in the server's log (the log handler wraps long lines).
+        self.assertIn("Dewey tool call failed", stderr)
+        self.assertIn("RuntimeError", stderr)
 
     async def test_started_like_an_agent_does(self):
         # Agents start the server from their own folder, with only the variables in their config.

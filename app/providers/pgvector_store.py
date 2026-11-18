@@ -27,6 +27,7 @@ import psycopg
 from dateutil.parser import parse
 from pgvector.psycopg import register_vector
 
+from .base import UserFacingError
 from .embeddings import Embedder, Reranker
 
 # Azure's SplitSkill used 512 tokens with 96 overlap. English prose averages
@@ -45,7 +46,7 @@ class PgVectorConfig:
     database_url: str
 
 
-class IndexMismatchError(Exception):
+class IndexMismatchError(UserFacingError):
     """The database was indexed with a different embedding model or dimension."""
 
 

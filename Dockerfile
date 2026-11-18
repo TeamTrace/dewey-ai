@@ -25,10 +25,13 @@ RUN groupadd --gid 1000 dewey \
 
 WORKDIR /app
 
+# requirements.txt pins every package, so a rebuild installs the same versions. CPU-only
+# PyTorch comes from its own index, pinned here; Dependabot doesn't see this line, so bump
+# it by hand.
 COPY requirements.txt requirements-local.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && if [ "$INSTALL_LOCAL_MODELS" = "true" ]; then \
-         pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+         pip install --no-cache-dir torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu \
          && pip install --no-cache-dir -r requirements-local.txt; \
        fi
 

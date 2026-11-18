@@ -106,6 +106,12 @@ trying Dewey on your own computer. It has **no login**, so:
   400, unless `DEWEY_DEMO_BEHIND_AUTH_PROXY=true` (a proxy forwards its own host name). Without this, a
   web page you visit could point its own name at 127.0.0.1 ("DNS rebinding") and ask your Dewey
   questions on your API keys.
+- **It answers only its own page:** a request that a script on another web page sends (the browser
+  marks it with that page's `Origin`) is refused with status 403, again unless
+  `DEWEY_DEMO_BEHIND_AUTH_PROXY=true`. Gradio blocks other pages only when the address is exactly
+  `localhost` or `127.0.0.1`; without this check, a page you visit could ask questions at
+  `http://anything.localhost:7860` (browsers send `*.localhost` to your own computer) and read the
+  answers.
 - **Always off:** Gradio's usage telemetry, the "Use via API" page, the `/monitoring` pages, Gradio's
   own MCP server and public share links. Gradio's REST routes can't skip the queue, and the generic
   upload route accepts at most 1 MB (Dewey has no upload fields). These are Gradio 5.44.1 options we
@@ -114,6 +120,12 @@ trying Dewey on your own computer. It has **no login**, so:
 - **Not off:** Gradio 5.44.1's default theme loads a font from Google Fonts (`themes/default.py`, and
   its page template preconnects to `fonts.googleapis.com`), so each browser that opens the page
   contacts Google. Questions and answers are not part of that request.
+- **Blocked:** Gradio 5.44.1's page template (`templates/frontend/index.html`) also loads a script,
+  iframe-resizer, from `cdnjs.cloudflare.com`, with no integrity check. A script runs inside the page,
+  next to your questions and answers, so Dewey sends a `Content-Security-Policy: script-src 'self'
+  'unsafe-inline'` header that lets the page run only scripts served by Dewey itself (the demo is never
+  embedded in another page, so iframe-resizer isn't needed). The browser then doesn't load or run it;
+  its developer console reports the blocked script, which is expected.
 - `DEWEY_CONCURRENCY` (default 4) is how many questions are answered at the same time. Gradio's own
   default is 1, which makes everyone wait in line behind the slowest answer.
 
@@ -122,7 +134,7 @@ At startup it prints what it's doing, for example in the Compose `demo` service:
 ```
 Dewey: Listening on 0.0.0.0:7860 (reachable from other machines).
 Dewey: Demo page, no login (DEWEY_DEMO_PUBLISHED_ON_LOOPBACK=true): Docker must publish this port on the host's 127.0.0.1 only.
-Dewey: Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding).
+Dewey: Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding) and come from the demo page itself (blocks other web pages).
 ```
 
 To give colleagues a chat page, connect a chat app they can sign in to (Open WebUI, LibreChat) to the
@@ -471,8 +483,10 @@ and refusals: [MCP.md](MCP.md#before-you-start-http).
       once. Keep `data/*.json` too.
 - [ ] **Logs are newsroom-confidential:** Dewey prints search filters (dates, author names) to its error
       log.
-- [ ] **Updates:** rebuild the image now and then (`docker compose up -d --build`, `fly deploy`) to pick
-      up security fixes in the base image and libraries.
+- [ ] **Updates:** `requirements.txt` pins every Python package, so rebuilding the image picks up
+      security fixes in the base image only. Library fixes arrive as pull requests from Dependabot
+      (`.github/dependabot.yml`; turn on "Dependabot security updates" in your fork's settings): merge
+      them, then rebuild (`docker compose up -d --build`, `fly deploy`).
 
 ## Troubleshooting
 

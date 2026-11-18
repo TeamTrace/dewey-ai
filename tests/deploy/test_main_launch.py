@@ -151,10 +151,13 @@ class LaunchPlanTest(unittest.TestCase):
 
 
 class FakeDewey:
+    questions = []  # every question asked, across instances (the live-server tests check it)
+
     def __init__(self, *args):
         pass
 
     def process(self, message, history):
+        FakeDewey.questions.append(message)
         yield "Look", [{"title": "Searching", "status": "pending", "content": "question"}]
         yield "Look [1](https://example.com/a)", [{"title": "Searching", "status": "done", "content": "question"}]
 
@@ -173,6 +176,67 @@ class ChatHandlerTest(unittest.TestCase):
         self.assertEqual(len(final_history), 3)  # user, one step, answer (earlier partials replaced)
         self.assertIsNotNone(final_state["session_id"])
         self.assertEqual(final_state["user_data"]["message_count"], 1)
+
+
+class _PlanningLLM:
+    """Fake LLM: plans a search for the question it is given (with a byline filter) and
+    streams a three-part answer."""
+
+    def generate_metadata(self, messages, current_date):
+        question = messages[-1]["content"]
+        return {"question": question, "date_range": {"start_date": "2024-01-01", "end_date": "2024-03-31"},
+                "authors": [{"name": f"Byline for {question}"}]}
+
+    def stream_answer(self, messages, current_date):
+        yield "Part one [SRC1]."
+        yield " Part two."
+        yield " Part three."
+
+
+class _OneSourceRetriever:
+    def retrieve(self, metadata):
+        return [json.dumps({"url": "https://news.example.org/a", "publish_date": "2024-02-01",
+                            "authors": [], "headline": "A", "content": "text"})]
+
+
+class SharedDeweyTest(unittest.TestCase):
+    """main() builds one Dewey for every visitor and Gradio answers up to DEWEY_CONCURRENCY
+    questions at once, stepping each handler generator in a worker thread. One person's
+    question, dates and byline filter must never appear in another person's chat (or, through
+    that chat history, in their next prompt)."""
+
+    ALICE = "parking meters downtown"
+    BOB = "Which ATF informant spoke to us about ghost guns?"
+
+    def test_overlapping_questions_keep_their_own_steps(self):
+        from dewey import Dewey
+
+        handler = main.make_chat_handler(Dewey(_PlanningLLM(), _OneSourceRetriever()))
+        alice = handler(self.ALICE, [], {"session_id": None, "user_data": {}})
+        bob = handler(self.BOB, [], {"session_id": None, "user_data": {}})
+
+        # Alice's answer starts streaming...
+        alice_history = None
+        while not (alice_history and "Part one" in alice_history[-1]["content"]):
+            alice_history, _ = next(alice)
+        # ...then Bob asks, and his search is planned while Alice's answer is still streaming.
+        bob_history = None
+        while not (bob_history and "Part one" in bob_history[-1]["content"]):
+            bob_history, _ = next(bob)
+        alice_rest = [h for h, _ in alice]
+        bob_rest = [h for h, _ in bob]
+
+        alice_text = json.dumps([alice_history] + alice_rest)
+        bob_text = json.dumps([bob_history] + bob_rest)
+        self.assertNotIn(self.BOB, alice_text)
+        self.assertNotIn(self.ALICE, bob_text)
+        for final, own in ((alice_rest[-1], self.ALICE), (bob_rest[-1], self.BOB)):
+            steps = [m for m in final if m.get("metadata")]
+            self.assertEqual([s["metadata"]["title"] for s in steps], ["Generating metadata", "Searching articles"])
+            self.assertIn(f'Searched "{own}"', steps[0]["content"])
+            self.assertIn(f"Written by Byline for {own}", steps[0]["content"])
+            self.assertEqual(final[-1]["content"],
+                             "Part one [[1]](https://news.example.org/a). Part two. Part three.")
 
 
 class MainFunctionTest(unittest.TestCase):
@@ -255,13 +319,36 @@ def free_port():
 
 def raw_get(port, path, host):
     """GET with an explicit Host header, as a browser sends after DNS rebinding."""
+    status, _, body = raw_request(port, "GET", path, {"Host": host})
+    return status, body
+
+
+def raw_request(port, method, path, headers, body=None):
+    """(status, response headers, body text) for a request with exactly these headers."""
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
     try:
-        conn.request("GET", path, headers={"Host": host})
+        conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
-        return response.status, response.read().decode("utf-8", "replace")
+        return response.status, response.headers, response.read().decode("utf-8", "replace")
     finally:
         conn.close()
+
+
+def submit_fn(port, host):
+    """fn_index and trigger_id of the chat's submit event, from /config."""
+    status, _, body = raw_request(port, "GET", "/config", {"Host": host})
+    assert status == 200, (status, body)
+    (submit,) = [d for d in json.loads(body)["dependencies"]
+                 if d["targets"] and d["targets"][0][1] == "submit" and len(d["inputs"]) == 3]
+    return submit["id"], submit["targets"][0][0]
+
+
+def join_queue(port, headers, question, session_hash, fn):
+    """POST a question to Gradio's queue the way the page (or another web page's script) does."""
+    fn_index, trigger_id = fn
+    body = json.dumps({"data": [question, [], {"session_id": None, "user_data": {}}], "fn_index": fn_index,
+                       "trigger_id": trigger_id, "session_hash": session_hash, "event_data": None})
+    return raw_request(port, "POST", "/gradio_api/queue/join", {**headers, "Content-Type": "application/json"}, body)
 
 
 class HostCheckTest(unittest.TestCase):
@@ -273,6 +360,33 @@ class HostCheckTest(unittest.TestCase):
                      "0.0.0.0:7860", "10.0.0.5", "[::]:7860", "[::1", "", "localhost:7860@evil.example",
                      "demo:7860"]:
             self.assertFalse(main.loopback_host_header(host), host)
+
+    def test_same_origin(self):
+        for origin, host in [
+            (None, "127.0.0.1:7860"),                            # not sent by a web page (curl, Gradio's own checks)
+            ("http://127.0.0.1:7860", "127.0.0.1:7860"),
+            ("http://localhost:7860", "LOCALHOST:7860"),
+            ("http://dewey.localhost:7860", "dewey.localhost:7860"),
+            ("http://[::1]:7860", "[::1]:7860"),
+            ("http://localhost", "localhost:80"),
+            ("https://localhost", "localhost:443"),
+        ]:
+            self.assertTrue(main.same_origin(origin, host), (origin, host))
+        for origin, host in [
+            ("https://evil.example", "x.localhost:7860"),       # another web page, via a *.localhost name
+            ("https://evil.example", "127.0.0.1:7860"),
+            ("http://evil.localhost:7860", "x.localhost:7860"),
+            ("http://localhost:3000", "localhost:7860"),         # another local web server's page
+            ("http://127.0.0.1:7860", "localhost:7860"),
+            ("https://127.0.0.1:7860", "127.0.0.1:7861"),
+            ("null", "127.0.0.1:7860"),                          # sandboxed frames, file: pages
+            ("", "127.0.0.1:7860"),
+            ("file://", "127.0.0.1:7860"),
+            ("http://127.0.0.1:7860/", "127.0.0.1:7860"),
+            ("http://u@127.0.0.1:7860", "127.0.0.1:7860"),
+            ("http://127.0.0.1:99999", "127.0.0.1:99999"),
+        ]:
+            self.assertFalse(main.same_origin(origin, host), (origin, host))
 
 
 class LiveDemo:
@@ -340,6 +454,59 @@ class LocalDemoServerTest(unittest.TestCase):
                 self.assertEqual(raw_get(self.port, "/config", host)[0], 200)
                 self.assertEqual(raw_get(self.port, "/", host)[0], 200)
 
+    def test_other_web_pages_are_refused(self):
+        # Gradio's CORS check refuses other origins only for the exact Host names localhost and
+        # 127.0.0.1. For any *.localhost name (which browsers resolve to 127.0.0.1 themselves) it
+        # echoes the page's Origin back, so without Dewey's check a script on any web site could
+        # ask questions on the newsroom's API keys and read the answers.
+        fn = submit_fn(self.port, f"127.0.0.1:{self.port}")
+        asked = len(FakeDewey.questions)
+        for host, origin in [(f"x.localhost:{self.port}", "https://evil.example"),
+                             (f"x.localhost:{self.port}", f"http://evil.localhost:{self.port}"),
+                             (f"[::1]:{self.port}", "https://evil.example"),
+                             (f"127.0.0.1:{self.port}", "https://evil.example"),
+                             (f"127.0.0.1:{self.port}", "null"),
+                             (f"localhost:{self.port}", f"http://localhost:{self.port + 1}")]:
+            headers = {"Host": host, "Origin": origin}
+            with self.subTest(host=host, origin=origin):
+                for path in ["/", "/config"]:
+                    status, _, body = raw_request(self.port, "GET", path, headers)
+                    self.assertEqual(status, 403)
+                    self.assertNotIn("api_prefix", body)
+                status, _, body = join_queue(self.port, headers, "SECRET evil question", "evil1", fn)
+                self.assertEqual(status, 403)
+                self.assertNotIn("event_id", body)
+        self.assertEqual(len(FakeDewey.questions), asked)
+        self.assertNotIn("SECRET evil question", FakeDewey.questions)
+
+    def test_the_pages_own_requests_work(self):
+        # Browsers send Origin on the page's own POSTs too: the demo's origin must be accepted,
+        # under every loopback name it can be opened at.
+        fn = submit_fn(self.port, f"127.0.0.1:{self.port}")
+        for i, name in enumerate(["127.0.0.1", "localhost", "dewey.localhost"]):
+            headers = {"Host": f"{name}:{self.port}", "Origin": f"http://{name}:{self.port}"}
+            with self.subTest(name=name):
+                self.assertEqual(raw_request(self.port, "GET", "/config", headers)[0], 200)
+                status, _, body = join_queue(self.port, headers, f"own page question {i}", f"own{i}", fn)
+                self.assertEqual(status, 200, body)
+                self.assertIn("event_id", json.loads(body))
+                status, _, stream = raw_request(self.port, "GET", f"/gradio_api/queue/data?session_hash=own{i}",
+                                                headers)
+                self.assertEqual(status, 200)
+                self.assertIn("https://example.com/a", stream)
+
+    def test_page_may_run_only_its_own_scripts(self):
+        # Gradio 5.44.1's page template loads iframe-resizer from cdnjs.cloudflare.com, with no
+        # integrity hash; the Content-Security-Policy keeps browsers from loading or running it.
+        status, headers, body = raw_request(self.port, "GET", "/", {"Host": f"127.0.0.1:{self.port}"})
+        self.assertEqual(status, 200)
+        self.assertIn("https://cdnjs.cloudflare.com/", body)
+        self.assertEqual(headers["Content-Security-Policy"], "script-src 'self' 'unsafe-inline'")
+        for host in [f"evil.example:{self.port}", f"127.0.0.1:{self.port}"]:
+            refused = raw_request(self.port, "GET", "/", {"Host": host, "Origin": "https://evil.example"})
+            self.assertIn(refused[0], (400, 403))
+            self.assertEqual(refused[1]["Content-Security-Policy"], "script-src 'self' 'unsafe-inline'")
+
     def test_settings_applied(self):
         demo = self.server.demo
         self.assertIs(demo.analytics_enabled, False)
@@ -382,6 +549,13 @@ class BehindAuthProxyServerTest(unittest.TestCase):
 
     def test_public_host_name_is_accepted(self):
         self.assertEqual(raw_get(self.server.port, "/config", "dewey.example.org")[0], 200)
+
+    def test_origin_check_is_off_and_scripts_still_limited(self):
+        # The sign-in proxy decides who gets in; it may also forward its own Origin.
+        status, headers, _ = raw_request(self.server.port, "GET", "/",
+                                         {"Host": "dewey.example.org", "Origin": "https://dewey.example.org"})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Security-Policy"], "script-src 'self' 'unsafe-inline'")
 
     def test_monitoring_is_still_not_served(self):
         self.assertEqual(raw_get(self.server.port, "/monitoring/summary", "dewey.example.org")[0], 404)

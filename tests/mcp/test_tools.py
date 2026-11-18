@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import io
 import json
+import re
 import threading
 import unittest
 
@@ -20,6 +21,7 @@ from mcp_server import (
     parse_args, resolve_http_config, stdout_to_stderr, transport_security_for,
 )
 from models import NewsroomConfig
+from providers.base import UserFacingError
 
 from .fake_stack import STRAY_STDOUT_MARKER, FakeLLM, FakeRetriever
 from .helpers import TEST_TOKEN
@@ -123,11 +125,60 @@ class ToolsTest(unittest.TestCase):
                 self.call(server, "search_archive", args)
             self.assertIn(message, str(cm.exception))
 
-    def test_provider_errors_become_tool_errors_and_are_logged(self):
+    def test_provider_errors_are_logged_and_clients_get_a_reference(self):
+        # Exception text from drivers and SDKs can quote secrets (see the DATABASE_URL tests below),
+        # so clients get a generic message and a reference; the details stay in the server's log.
         with self.assertLogs("dewey.mcp", "ERROR") as logs, self.assertRaises(ToolError) as cm:
             self.call(make_server(), "search_archive", {"question": "explode"})
-        self.assertIn("fake retriever failure", str(cm.exception))
+        message = str(cm.exception)
+        self.assertNotIn("fake retriever failure", message)
+        self.assertIn("problem on the Dewey server", message)
+        (ref,) = re.findall(r"reference ([0-9a-f]{12})", message)
+        self.assertIn(f"reference {ref}", logs.output[0])
         self.assertIn("RuntimeError: fake retriever failure", logs.output[0])
+
+    def test_database_url_password_never_reaches_clients(self):
+        # A real PgVectorStore (fake embedder) with a DATABASE_URL psycopg can't parse: its error
+        # message quotes the password. ask_archive goes through the same path.
+        from providers.pgvector_store import PgVectorConfig, PgVectorStore
+
+        class Embedder:
+            model, dim = "fake", 3
+
+            def embed(self, texts, input_type):
+                return [[0.1, 0.2, 0.3] for _ in texts]
+
+        for url, secret in [("postgresql://dewey:Tr4ce%Secret@db.example.org:5432/dewey", "Tr4ce%Secret"),
+                            ("postgresql://dewey:S3cr3t Pass@db.example.org/dewey", "S3cr3t Pass"),
+                            ("'postgresql://dewey:GoodPass123@db.example.org/dewey'", "GoodPass123")]:
+            store = PgVectorStore(PgVectorConfig(database_url=url), Embedder(), reranker=None)
+            server = create_server(FakeLLM(), store, NewsroomConfig(publisher="The Example Times"))
+            for tool in ("search_archive", "ask_archive"):
+                with self.subTest(url=url, tool=tool), self.assertLogs("dewey.mcp", "ERROR") as logs, \
+                        self.assertRaises(ToolError) as cm:
+                    self.call(server, tool, {"question": "budget"})
+                self.assertNotIn(secret, str(cm.exception))
+                self.assertIn("problem on the Dewey server", str(cm.exception))
+                self.assertIn("ProgrammingError", logs.output[0])  # the operator still sees what failed
+
+    def test_user_facing_provider_errors_are_passed_on(self):
+        # Errors written to be shown (IndexMismatchError, OpenRouterRoutingError) keep their message.
+        from providers.open_llm import OpenRouterRoutingError
+        from providers.pgvector_store import IndexMismatchError
+
+        for error in (IndexMismatchError("No Dewey index found in this database. Run setup_postgres.py first."),
+                      OpenRouterRoutingError("OpenRouter could not route Dewey's request; pick another model.")):
+            self.assertIsInstance(error, UserFacingError)
+
+            class Failing:
+                def retrieve(self, metadata, error=error):
+                    raise error
+
+            server = create_server(FakeLLM(), Failing(), NewsroomConfig(publisher="The Example Times"))
+            with self.subTest(error=type(error).__name__), self.assertLogs("dewey.mcp", "ERROR"), \
+                    self.assertRaises(ToolError) as cm:
+                self.call(server, "search_archive", {"question": "budget"})
+            self.assertIn(str(error), str(cm.exception))
 
     def test_ask_archive_returns_the_final_linked_answer_and_its_sources(self):
         (content, structured), out, err = self.call(

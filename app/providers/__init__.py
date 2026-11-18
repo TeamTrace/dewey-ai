@@ -147,6 +147,8 @@ def build_pgvector_store():
     if "voyage" in (embed_provider, rerank_provider):
         _require("VOYAGE_API_KEY")
     _require("DATABASE_URL")
+    database_url = os.environ["DATABASE_URL"]
+    check_database_url(database_url)
 
     try:
         embedder = make_embedder(
@@ -158,7 +160,24 @@ def build_pgvector_store():
     except ValueError as e:
         raise StackConfigError(str(e)) from None
 
-    return PgVectorStore(PgVectorConfig(database_url=os.environ["DATABASE_URL"]), embedder, reranker)
+    return PgVectorStore(PgVectorConfig(database_url=database_url), embedder, reranker)
+
+
+def check_database_url(database_url: str) -> None:
+    """Parse DATABASE_URL the way psycopg.connect() will, at startup. psycopg's own message
+    quotes the part it couldn't parse, which is often the password, so it is not repeated."""
+    from psycopg import Error
+    from psycopg.conninfo import conninfo_to_dict
+
+    try:
+        conninfo_to_dict(database_url)
+    except Error:
+        raise StackConfigError(
+            "DATABASE_URL is not a valid Postgres connection URL (its value is not shown here, because it "
+            "contains the password). It should look like postgresql://USER:PASSWORD@HOST:5432/DATABASE, "
+            "with no quotes or spaces around it. If the password contains characters such as % @ : / # ? "
+            "or spaces, write them percent-encoded (for example %25 for %, %40 for @, %20 for a space)."
+        ) from None
 
 
 __all__ = ["build_stack", "build_pgvector_store", "current_stack", "StackConfigError", "LLMProvider", "Retriever"]

@@ -40,6 +40,8 @@ from pydantic import ValidationError
 from models import NewsroomConfig, SearchMetadata
 from tools import load_answer_prompt, load_search_prompt
 
+from .base import UserFacingError
+
 DEFAULT_BASE_URL = "http://localhost:11434/v1"  # Ollama
 THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -75,7 +77,7 @@ def parse_openrouter_privacy(value: Optional[str]) -> str:
     return level
 
 
-class OpenRouterRoutingError(RuntimeError):
+class OpenRouterRoutingError(UserFacingError, RuntimeError):
     """OpenRouter found no endpoint that meets the request's privacy and parameter preferences."""
 
 

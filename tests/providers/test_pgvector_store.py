@@ -99,6 +99,48 @@ class BuildWhereTests(unittest.TestCase):
         self.assertEqual(set(params), {"start_date", "authors"})
 
 
+@unittest.skipIf(pgvector_store is None, IMPORT_ERROR)
+class DatabaseUrlCheckTests(unittest.TestCase):
+    """A DATABASE_URL psycopg can't parse is refused at startup, without repeating psycopg's
+    message: it quotes the unparseable part, usually the password."""
+
+    BAD = [("postgresql://dewey:Tr4ce%Secret@db.example.org:5432/dewey", "Tr4ce%Secret"),
+           ("postgresql://dewey:S3cr3t Pass@db.example.org/dewey", "S3cr3t Pass"),
+           ("postgres:/dewey:S3cr3tPass@db.example.org/dewey", "S3cr3tPass"),
+           ("'postgresql://dewey:GoodPass123@db.example.org/dewey'", "GoodPass123")]
+
+    def test_valid_urls_pass(self):
+        import providers
+
+        for url in ["postgresql://dewey:GoodPass123@db:5432/dewey?sslmode=require",
+                    "postgresql://dewey:Good%25Pass@db/dewey",
+                    "postgresql://postgres@/dewey?host=/var/run/postgresql",
+                    "host=db user=dewey password=x dbname=dewey"]:
+            with self.subTest(url=url):
+                providers.check_database_url(url)
+
+    def test_malformed_urls_are_refused_without_the_password(self):
+        import providers
+
+        for url, secret in self.BAD:
+            with self.subTest(url=url), self.assertRaises(providers.StackConfigError) as cm:
+                providers.check_database_url(url)
+            self.assertNotIn(secret, str(cm.exception))
+            self.assertIn("percent-encoded", str(cm.exception))
+
+    def test_build_pgvector_store_checks_it(self):
+        from unittest import mock
+
+        import providers
+
+        url, secret = self.BAD[0]
+        env = {"DEWEY_STACK": "anthropic", "VOYAGE_API_KEY": "test-key", "DATABASE_URL": url}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                self.assertRaises(providers.StackConfigError) as cm:
+            providers.build_pgvector_store()
+        self.assertNotIn(secret, str(cm.exception))
+
+
 ARTICLES = [
     # id, authors, publish_date (UTC)
     ("a1", ["Jane Doe"], "2024-03-01T12:00:00Z"),

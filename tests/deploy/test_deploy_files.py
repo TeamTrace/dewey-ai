@@ -78,6 +78,8 @@ class DockerfileTest(unittest.TestCase):
         self.assertIn("pip install --no-cache-dir -r requirements.txt", run)
         self.assertIn("--index-url https://download.pytorch.org/whl/cpu", run)
         self.assertIn("-r requirements-local.txt", run)
+        # The local-models build installs one exact PyTorch version, not whatever is newest.
+        self.assertRegex(run, r"pip install --no-cache-dir torch==\d+\.\d+\.\d+ --index-url ")
 
     def test_copies_only_what_it_needs(self):
         copies = self.values("COPY")
@@ -91,6 +93,66 @@ class DockerfileTest(unittest.TestCase):
         (check,) = self.values("HEALTHCHECK")
         code = re.search(r'python -c "(.*)"$', check).group(1)
         compile(code, "HEALTHCHECK", "exec")
+
+
+REQUIREMENT_LINE = re.compile(r"(?P<name>[A-Za-z0-9._-]+)(?:\[(?P<extras>[a-z0-9,_-]+)\])?==(?P<version>[^\s;]+)"
+                              r"(?:\s*;\s*(?P<marker>.+))?")
+
+
+def pinned_requirements():
+    """{normalized name: (version, extras, marker or None)} from requirements.txt."""
+    pins = {}
+    for line in read("requirements.txt").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            m = REQUIREMENT_LINE.fullmatch(line)
+            assert m, f"not an exact pin: {line!r}"
+            name = re.sub(r"[-_.]+", "-", m["name"]).lower()
+            pins[name] = (m["version"], set((m["extras"] or "").split(",")) - {""}, m["marker"])
+    return pins
+
+
+class RequirementsTest(unittest.TestCase):
+    """requirements.txt pins every package the install pulls in, so a Docker rebuild can't pick up a
+    newly published (possibly malicious) release of a dependency's dependency. Upstream's file was a
+    complete freeze; packages added later must bring their dependencies' pins with them."""
+
+    def test_every_line_is_an_exact_pin(self):
+        self.assertGreater(len(pinned_requirements()), 50)
+
+    def test_dependencies_of_pinned_packages_are_pinned_too(self):
+        from importlib import metadata
+
+        from packaging.markers import default_environment
+        from packaging.requirements import Requirement
+
+        pins = pinned_requirements()
+        env = default_environment()
+        applicable = {n for n, (_, _, marker) in pins.items()
+                      if not marker or Requirement(f"x; {marker}").marker.evaluate(env)}
+        missing = []
+        for name in sorted(applicable):
+            version, extras, _ = pins[name]
+            try:
+                dist = metadata.distribution(name)
+            except metadata.PackageNotFoundError:
+                self.skipTest(f"requirements.txt is not installed here ({name} is missing)")
+            for spec in dist.requires or []:
+                req = Requirement(spec)
+                if req.marker and not any(req.marker.evaluate({**env, "extra": e}) for e in (extras or {""})):
+                    continue
+                dep = re.sub(r"[-_.]+", "-", req.name).lower()
+                if dep not in pins:
+                    missing.append(f"{dep} (needed by {name})")
+        self.assertEqual(missing, [], "add these to requirements.txt as exact pins")
+
+    @unittest.skipIf(yaml is None, "PyYAML not installed")
+    def test_dependabot_proposes_updates(self):
+        config = yaml.safe_load(read(".github/dependabot.yml"))
+        ecosystems = {u["package-ecosystem"]: u for u in config["updates"]}
+        self.assertEqual(set(ecosystems), {"pip", "docker", "github-actions"})
+        for update in ecosystems.values():
+            self.assertEqual(update["directory"], "/")
 
 
 class IgnoreFilesTest(unittest.TestCase):

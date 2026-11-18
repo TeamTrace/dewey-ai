@@ -442,12 +442,18 @@ couldn't confirm that a custom connector can use Dewey's HTTP server (*unverifie
 - **Logs.** The server's diagnostics (including the search filters it applies, and error tracebacks)
   go to stderr. In stdio mode the client that started the server receives that output; whether and
   where it keeps it differs per client (*unverified; check the client's docs*).
+- **Errors.** When a search fails on the server (the database is down, a model service refuses a key,
+  `DATABASE_URL` is mistyped), clients get only "a problem on the Dewey server" and a reference; the
+  details, which can quote settings such as `DATABASE_URL` with its password, stay in the server's log
+  under that reference. Mistakes in the tool's own arguments (a bad date, an empty question) and
+  index or OpenRouter routing problems are explained to the client.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
 | The client says the server failed to start or disconnected (stdio) | Run the exact command from the client's config in a terminal; configuration errors are printed there |
+| A tool call fails with "a problem on the Dewey server ... reference ..." | Search the server's log (stderr; `docker compose logs dewey`) for that reference: the full error is there |
 | `docker compose up` stops with `required variable DEWEY_MCP_TOKEN is missing a value` | Add `DEWEY_MCP_TOKEN` to `.env` ([Before you start: HTTP](#before-you-start-http)) |
 | `401` | Token missing or wrong; the header must be `Authorization: Bearer <token>`. In Open WebUI, check the Key field; in Hermes and LibreChat, check that the variable is set |
 | The client offers to "log in" or "authenticate" to Dewey | Dewey has no OAuth sign-in; the header is missing or the token is wrong. In LibreChat, set `requiresOAuth: false` |

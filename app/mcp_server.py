@@ -29,6 +29,7 @@ import os
 import re
 import sys
 import threading
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -40,6 +41,7 @@ from dotenv import load_dotenv
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
@@ -47,7 +49,7 @@ from pydantic import BaseModel, Field
 from dewey import Dewey
 from models import NewsroomConfig
 from providers import StackConfigError, build_stack
-from providers.base import LLMProvider, Retriever
+from providers.base import LLMProvider, Retriever, UserFacingError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -67,6 +69,13 @@ MAX_AUTHOR_CHARS = 200
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 EMPTY_ANSWER = "(Dewey's language model returned an empty answer. Try rephrasing the question.)"
+
+# What clients see when provider code fails. The exception's own text stays in the server's
+# log: database drivers and SDKs quote what they couldn't use, such as DATABASE_URL with its
+# password, and clients (and the chat apps' own language models) shouldn't receive it.
+TOOL_FAILED = ("Dewey couldn't complete this request because of a problem on the Dewey server (for example, "
+               "its database or a model service is unreachable or misconfigured). Ask whoever runs Dewey to "
+               "check the server's log for reference {ref}.")
 
 logger = logging.getLogger("dewey.mcp")
 
@@ -112,13 +121,17 @@ def _call_quietly(fn, args):
     with stdout_to_stderr():
         try:
             return fn(*args)
-        except Exception:
-            logger.exception("Dewey tool call failed")
-            raise
+        except Exception as e:
+            ref = uuid.uuid4().hex[:12]
+            logger.exception("Dewey tool call failed (reference %s)", ref)
+            if isinstance(e, UserFacingError):
+                raise  # a message written to be shown, with no secrets (providers/base.py)
+            raise ToolError(TOOL_FAILED.format(ref=ref)) from None
 
 
 async def run_quietly(fn, *args):
-    """Run blocking provider code in a worker thread (so HTTP clients aren't blocked), print() on stderr."""
+    """Run blocking provider code in a worker thread (so HTTP clients aren't blocked), print() on stderr.
+    A failure is logged in full; clients get only a reference to the log entry (see TOOL_FAILED)."""
     return await anyio.to_thread.run_sync(_call_quietly, fn, args)
 
 
@@ -220,7 +233,7 @@ def answer_question(llm: LLMProvider, retriever: Retriever, question: str) -> Tu
     """Run Dewey's full pipeline. Returns (final answer with linked citations, raw sources)."""
     recorder = _RecordingRetriever(retriever)
     answer = ""
-    # A fresh Dewey per call: Dewey keeps per-request state on the instance.
+    # A fresh Dewey per call, around this call's own recording retriever.
     for text, _steps in Dewey(llm, recorder).process(question, [], show_steps=False):
         # Each yield is the whole answer so far with citations linked; the last one is complete.
         answer = text

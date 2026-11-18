@@ -24,9 +24,11 @@ Settings (environment or .env):
   DEWEY_CONCURRENCY    how many questions are answered at the same time (default 4)
 
 Telemetry, the API docs page, the /monitoring pages, Gradio's MCP server, share
-links and file uploads over 1 MB are always off. Unless DEWEY_DEMO_BEHIND_AUTH_PROXY
-is set, only requests addressed to localhost/127.0.0.1 are answered (DNS rebinding;
-see RequestGuard).
+links and file uploads over 1 MB are always off, and the page may run scripts only
+from Dewey itself (Gradio's page template also loads one from cdnjs.cloudflare.com).
+Unless DEWEY_DEMO_BEHIND_AUTH_PROXY is set, only requests addressed to localhost/
+127.0.0.1 that come from the demo page itself (or from no web page at all) are
+answered (DNS rebinding, other web pages; see RequestGuard).
 """
 from __future__ import annotations
 
@@ -38,6 +40,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HOST = "127.0.0.1"
@@ -142,10 +145,44 @@ def loopback_host_header(value: str) -> bool:
         return False
 
 
+def same_origin(origin: Optional[str], host: str) -> bool:
+    """True when a request's Origin header is absent or is the demo page's own origin,
+    http(s)://<the request's Host>. Browsers send Origin on every cross-origin request
+    and every POST, so this refuses requests made by script on other web pages.
+
+    Gradio's CORS middleware only refuses other web pages when the Host is exactly
+    localhost or 127.0.0.1; for any other loopback name (x.localhost, which browsers
+    resolve to 127.0.0.1 themselves, [::1], 127.0.0.2) it lets every origin read the
+    responses. "null" (sandboxed frames, file: pages) is refused too."""
+    if origin is None:
+        return True
+    try:
+        o = urlsplit(origin.strip().lower())
+        h = urlsplit(f"{o.scheme}://{host.strip().lower()}")
+        default_port = {"http": 80, "https": 443}[o.scheme]
+        if o.username or o.password or o.path or o.query or o.fragment or not o.hostname:
+            return False
+        return (o.hostname, o.port or default_port) == (h.hostname, h.port or default_port)
+    except (KeyError, ValueError):  # another scheme, "null", a bad port
+        return False
+
+
+# Scripts only from Dewey's own address. Gradio 5.44.1's page template loads
+# iframe-resizer from cdnjs.cloudflare.com (no integrity hash), which would run next to
+# the conversation; the demo is never embedded in another page, so it isn't needed.
+# 'unsafe-inline' is for the template's own inline scripts (the page config).
+CONTENT_SECURITY_POLICY = b"script-src 'self' 'unsafe-inline'"
+
 WRONG_HOST_MESSAGE = (
     "Dewey's demo page has no login, so it only answers requests addressed to localhost or "
     "127.0.0.1. Open it at http://127.0.0.1:<port>/ instead. (This stops web pages from reaching "
     f"it through DNS rebinding.) Behind a sign-in proxy, see {BEHIND_PROXY_ENV} in docs/DEPLOYMENT.md.\n"
+)
+
+OTHER_ORIGIN_MESSAGE = (
+    "Dewey's demo page has no login, so it only answers requests from its own page. This request "
+    "came from another web page (its Origin header names a different site), so it was refused. "
+    "Open the demo at http://127.0.0.1:<port>/ and ask there.\n"
 )
 
 
@@ -154,11 +191,14 @@ class RequestGuard:
 
     - Always: 404 for /monitoring and /monitoring/*. Gradio 5.44.1 serves
       /monitoring/summary (request counts and timings per function) even with
-      enable_monitoring=False.
+      enable_monitoring=False. Every response carries CONTENT_SECURITY_POLICY.
     - loopback_only (everything except DEWEY_DEMO_BEHIND_AUTH_PROXY): 400 unless
       the Host header is a loopback name. Without it, a web page the person visits
       can point its own host name at 127.0.0.1 (DNS rebinding) and use the demo as
-      if it were same-origin.
+      if it were same-origin. Then 403 unless the Origin header is absent or the
+      page's own (same_origin): otherwise script on any web page could ask questions
+      at http://x.localhost:<port>/ and read the answers, because Gradio's CORS
+      check only covers the exact names localhost and 127.0.0.1.
     """
 
     def __init__(self, app, loopback_only: bool = True):
@@ -172,11 +212,28 @@ class RequestGuard:
                 await self._refuse(scope, send, 404, "Not found.\n")
                 return
             if self.loopback_only:
-                host = next((v for k, v in scope.get("headers") or [] if k == b"host"), None)
+                headers = scope.get("headers") or []
+                host = next((v for k, v in headers if k == b"host"), None)
                 if host is None or not loopback_host_header(host.decode("latin-1")):
                     await self._refuse(scope, send, 400, WRONG_HOST_MESSAGE)
                     return
+                origins = [v.decode("latin-1") for k, v in headers if k == b"origin"]
+                if len(origins) > 1 or not same_origin(origins[0] if origins else None, host.decode("latin-1")):
+                    await self._refuse(scope, send, 403, OTHER_ORIGIN_MESSAGE)
+                    return
+        if scope["type"] == "http":
+            send = self._with_csp(send)
         await self.app(scope, receive, send)
+
+    @staticmethod
+    def _with_csp(send):
+        async def send_with_csp(message):
+            if message["type"] == "http.response.start":
+                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() != b"content-security-policy"]
+                message = {**message, "headers": headers + [(b"content-security-policy", CONTENT_SECURITY_POLICY)]}
+            await send(message)
+
+        return send_with_csp
 
     @staticmethod
     async def _refuse(scope, send, status: int, text: str) -> None:
@@ -188,7 +245,8 @@ class RequestGuard:
             "type": "http.response.start",
             "status": status,
             "headers": [(b"content-type", b"text/plain; charset=utf-8"),
-                        (b"content-length", str(len(body)).encode("ascii"))],
+                        (b"content-length", str(len(body)).encode("ascii")),
+                        (b"content-security-policy", CONTENT_SECURITY_POLICY)],
         })
         await send({"type": "http.response.body", "body": body})
 
@@ -261,7 +319,8 @@ def build_launch_plan(env: Mapping[str, str]) -> LaunchPlan:
     else:
         summary.append("Demo page, no login. Only this computer can reach it.")
     if loopback_only:
-        summary.append("Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding).")
+        summary.append("Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding) and "
+                       "come from the demo page itself (blocks other web pages).")
     summary.append(f"Answers up to {concurrency} question(s) at once (DEWEY_CONCURRENCY).")
     summary.append("Telemetry, API page, /monitoring, Gradio's MCP server and share links: off.")
     summary.append("For colleagues and AI tools, use Dewey's MCP server instead: docs/MCP.md.")
