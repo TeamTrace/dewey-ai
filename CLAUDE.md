@@ -10,7 +10,7 @@ Philadelphia Inquirer); this fork adds two non-Azure stacks, one of them fully o
 - `app/dewey.py`: vendor-neutral pipeline. `process()` runs three steps:
   1. `llm.generate_metadata()` → `{"question", "date_range": {"start_date", "end_date"}, "authors": [{"name"}]}`
   2. `retriever.retrieve(metadata)` → list of JSON strings (`url`, `publish_date`, `authors`, `headline`, `content`)
-  3. `llm.stream_answer()` → text deltas. `[SRCn]` is rewritten to a markdown link using the n-th source's URL.
+  3. `llm.stream_answer()` → text deltas, shown through `render_answer()`: `[SRCn]` becomes a markdown link to the n-th source's URL (made safe by `citation_href()`), and every other `[ ] < \ ://` the model wrote is turned into an HTML character reference.
 - `app/providers/`: one implementation per vendor; interfaces are in `base.py`.
   - `DEWEY_STACK=azure` (default): `azure_openai.py` + `azure_search.py`
   - `DEWEY_STACK=anthropic`: `anthropic_llm.py` (Claude) + `pgvector_store.py` (Postgres/pgvector)
@@ -32,6 +32,7 @@ Philadelphia Inquirer); this fork adds two non-Azure stacks, one of them fully o
 - All providers must return the same metadata/source shapes; `tips.py` and the citation linker depend on them.
 - The metadata step's output is model-generated: validate it before it reaches a query. Dates are checked with `date.fromisoformat`, OData strings are escaped, and SQL values are always bound parameters.
 - Author filters on the Postgres store (`AUTHOR_MATCH_SQL` in `pgvector_store.py`) ignore case and whitespace runs on both sides by applying the IMMUTABLE SQL function `dewey_byline_keys(text[])` to the stored and requested names, and must stay indexable (GIN index `articles_byline_keys_idx` on `dewey_byline_keys(authors)`): a filter the planner can only check after the HNSW scan loses a rare author's stories from vector search (`PostgresRecallTests`). Whole names only. Changing the function's body requires re-creating that index. The Azure path still matches exactly.
+- Archive text and model output are untrusted. Sources are sent after `SOURCES_PREAMBLE` (data, not instructions), and answers reach users only through `render_answer()`, so injected article text can't make the chat load an image or link that carries a question elsewhere. Don't bypass it or put raw source URLs into markdown.
 - Claude calls use `client.beta.messages.*` because they opt into server-side refusal fallbacks (`fallbacks="default"`, beta `server-side-fallback-2026-07-01`). Check `stop_reason == "refusal"` before using output. Don't use forced `tool_choice` with current Claude models (400); use structured outputs.
 - The embedding model/dimension is fixed per index and recorded in the `index_info` table; `PgVectorStore.check_index()` refuses a mismatch. Changing `EMBEDDING_PROVIDER`, `EMBED_MODEL` or `EMBED_DIM` requires a fresh database and a re-index.
 - `open_llm.py` must not assume the server enforces JSON schemas: it tries `json_schema`, falls back to `json_object`, strips `<think>` blocks and code fences, then validates with Pydantic.

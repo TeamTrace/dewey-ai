@@ -79,11 +79,20 @@ Anthropic does not offer an embedding model; its documentation points to Voyage 
 
 1. Get credentials:
    - `ANTHROPIC_API_KEY`: from the Claude Console.
-   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB). Not needed if you set `EMBEDDING_PROVIDER` and `RERANK_PROVIDER` to `local` or `none` (see the next section for the local setup).
+   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB). Before indexing, check the Atlas organization's Voyage AI data-collection setting (see [What the hosted providers receive](#what-the-hosted-providers-receive)). Not needed if you set `EMBEDDING_PROVIDER` and `RERANK_PROVIDER` to `local` or `none` (see [Running fully open source](#running-fully-open-source-open-stack) for the local setup).
 2. In `.env`, set `DEWEY_STACK="anthropic"`, `DATABASE_URL`, and the keys above. Optionally set `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION`.
 3. Follow the common setup above.
 
 Model and cost notes: both Claude steps default to `claude-opus-5-5`. The search-planning step runs at `low` effort and the answer at `medium`; override them with `ANTHROPIC_MODEL`, `ANTHROPIC_METADATA_EFFORT` and `ANTHROPIC_ANSWER_EFFORT`. Requests opt into Anthropic's server-side refusal fallback: if a safety classifier declines a request, the API retries it on a fallback model in the same call. If the whole chain declines, Dewey says so in the answer instead of failing silently.
+
+### What the hosted providers receive
+
+Every question a journalist asks leaves your network, and some questions are sensitive (for example, ones that name a confidential source). Check each provider's data-use and retention terms, and the settings you control, before you open Dewey to reporters. The notes below were not verified against the providers' current terms; the linked pages are the authority.
+
+- **Voyage AI (MongoDB Atlas)**, `anthropic` stack: receives every question (as the search query and as the rerank query), the candidate article excerpts sent for reranking and, at indexing time, the whole archive. MongoDB documents that it can collect data sent to the Atlas Embedding and Reranking API and use it to improve Voyage AI models, controlled per organization in Atlas **Organization Settings**. See [Model training data](https://www.mongodb.com/docs/voyageai/management/model-training-data/) and turn data collection off there if you don't want this. The default for a new organization is not verified here.
+- **Anthropic (Claude)**, `anthropic` stack: receives the conversation and the retrieved article text. Retention and use are set by your Anthropic API terms; check them, and any zero-data-retention arrangement your organization has, in the Claude Console.
+- **Azure OpenAI and Azure AI Search**, `azure` stack: receive the conversation, the search query and the retrieved article text. Azure OpenAI's abuse monitoring can keep prompts and outputs for a limited time unless Microsoft has approved your organization for modified abuse monitoring; see Microsoft's "Data, privacy, and security for Azure OpenAI" documentation.
+- **A hosted OpenAI-compatible server**, `open` stack with `OPEN_LLM_BASE_URL` pointing at another company's service: receives the conversation and the retrieved article text, under that service's terms. With a model server you run yourself and `local`/`none` embeddings and reranking, questions and articles stay on your own machines.
 
 ### Running fully open source (`open` stack)
 
