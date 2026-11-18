@@ -10,7 +10,7 @@ Philadelphia Inquirer); this fork adds a non-Azure stack.
 - `app/dewey.py`: vendor-neutral pipeline. `process()` runs three steps:
   1. `llm.generate_metadata()` → `{"question", "date_range": {"start_date", "end_date"}, "authors": [{"name"}]}`
   2. `retriever.retrieve(metadata)` → list of JSON strings (`url`, `publish_date`, `authors`, `headline`, `content`)
-  3. `llm.stream_answer()` → text deltas. `[SRCn]` is rewritten to a markdown link using the n-th source's URL.
+  3. `llm.stream_answer()` → text deltas, shown through `render_answer()`: `[SRCn]` becomes a markdown link to the n-th source's URL (made safe by `citation_href()`), and every other `[ ] < \ ://` the model wrote is turned into an HTML character reference.
 - `app/providers/`: one implementation per vendor; interfaces are in `base.py`.
   - `DEWEY_STACK=azure` (default): `azure_openai.py` + `azure_search.py`
   - `DEWEY_STACK=anthropic`: `anthropic_llm.py` (Claude) + `pgvector_store.py` (Voyage AI embeddings and rerank, Postgres/pgvector)
@@ -25,6 +25,7 @@ Philadelphia Inquirer); this fork adds a non-Azure stack.
 - Keep `dewey.py` free of vendor SDK imports. New vendors go in `providers/` and are wired up in `providers/__init__.py`, imported lazily.
 - All providers must return the same metadata/source shapes; `tips.py` and the citation linker depend on them.
 - The metadata step's output is model-generated: validate it before it reaches a query. Dates are checked with `date.fromisoformat`, OData strings are escaped, and SQL values are always bound parameters.
+- Archive text and model output are untrusted. Sources are sent after `SOURCES_PREAMBLE` (data, not instructions), and answers reach users only through `render_answer()`, so injected article text can't make the chat load an image or link that carries a question elsewhere. Don't bypass it or put raw source URLs into markdown.
 - Claude calls use `client.beta.messages.*` because they opt into server-side refusal fallbacks (`fallbacks="default"`, beta `server-side-fallback-2026-07-01`). Check `stop_reason == "refusal"` before using output. Don't use forced `tool_choice` with current Claude models (400); use structured outputs.
 - The embedding model/dimension is fixed per index. Changing `VOYAGE_EMBED_MODEL` or `VOYAGE_EMBED_DIM` requires a fresh database and a re-index.
 

@@ -53,7 +53,10 @@ with gr.Blocks(title="Dewey") as demo:
     # Session state
     session_state = gr.State({"session_id": None, "user_data": {}})
     
-    chatbot = gr.Chatbot(type="messages", label="Dewey")
+    # Gradio 6 always uses the messages format (no `type`). `buttons=[]` and
+    # `allow_tags=False` keep Gradio 5's defaults: no share/copy buttons, and no
+    # custom HTML tags kept in rendered messages.
+    chatbot = gr.Chatbot(label="Dewey", buttons=[], allow_tags=False)
     msg = gr.Textbox(label="Message", placeholder="Ask your question here...")
     clear = gr.Button("Clear")
     
