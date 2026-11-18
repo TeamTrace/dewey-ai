@@ -233,11 +233,12 @@ class _CredentialSafeRedirects(urllib.request.HTTPRedirectHandler):
 _SAFE_OPENER = urllib.request.build_opener(_CredentialSafeRedirects)
 
 
-def _open(req: urllib.request.Request, timeout: float):
-    # A caller may install its own opener (drupal.py does, to refuse cross-origin
-    # redirects with a clearer message); otherwise use the credential-safe one.
-    opener = getattr(urllib.request, "_opener", None) or _SAFE_OPENER
-    return opener.open(req, timeout=timeout)
+def _open(req: urllib.request.Request, timeout: float, opener=None):
+    # Never use urllib's global opener: urllib.request.urlopen() installs a plain
+    # default one the first time anything in the process calls it, which would
+    # silently turn off the cross-origin credential stripping. A caller that wants
+    # a stricter policy (drupal.py refuses cross-origin redirects) passes its own.
+    return (opener or _SAFE_OPENER).open(req, timeout=timeout)
 
 
 def _secrets_in(url: str, headers: Dict[str, str]) -> List[str]:
@@ -262,7 +263,7 @@ def scrub(text: str, secrets: Iterable[str]) -> str:
 
 
 def http_get(url: str, params: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None,
-             retries: int = 4, timeout: float = 30.0) -> Tuple[bytes, Dict[str, str]]:
+             retries: int = 4, timeout: float = 30.0, opener=None) -> Tuple[bytes, Dict[str, str]]:
     """
     GET with retries on 429/5xx/network errors (honoring Retry-After). Returns (body, headers).
     Credential headers are not forwarded across origins on redirect, and every
@@ -279,7 +280,7 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None, headers: Optiona
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, headers=req_headers)
-            with _open(req, timeout) as resp:
+            with _open(req, timeout, opener) as resp:
                 return resp.read(), {k.lower(): v for k, v in resp.headers.items()}
         except urllib.error.HTTPError as e:
             try:

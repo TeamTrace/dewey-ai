@@ -352,14 +352,12 @@ class _Client:
         headers = {"Accept": JSONAPI_MEDIA_TYPE}
         if self.auth and _origin(url) == self.trusted_origin:
             headers["Authorization"] = self.auth
-        # common.http_get uses urllib's global opener; swap in one that won't carry the login off the API's
-        # origin, for this request only.
+        # With a login, use an opener that refuses to follow the API off its own origin (common.http_get
+        # would strip the credentials, but a clear error is better than an anonymous 401 elsewhere).
         guarded = "Authorization" in headers
-        previous = getattr(urllib.request, "_opener", None)
-        if guarded:
-            urllib.request.install_opener(urllib.request.build_opener(_SameOriginRedirects(self.trusted_origin)))
+        opener = urllib.request.build_opener(_SameOriginRedirects(self.trusted_origin)) if guarded else None
         try:
-            return http_get_json(url, params, headers, retries=retries)
+            return http_get_json(url, params, headers, retries=retries, opener=opener)
         except _RedirectRefused:
             raise
         except ImporterError as e:
@@ -367,9 +365,6 @@ class _Client:
             m = _STATUS_RE.match(msg)
             kind = "http" if m else ("not_json" if "did not return JSON" in msg else "network")
             raise _ApiError(msg, int(m.group(1)) if m else None, _error_detail(msg), kind) from None
-        finally:
-            if guarded:
-                urllib.request.install_opener(previous)
 
 
 def _auth_header(args, api_url: str) -> Optional[str]:

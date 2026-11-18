@@ -78,6 +78,20 @@ class RedirectCredentialTests(unittest.TestCase):
         self.assertNotIn("x-api-key", landed)
         self.assertIn("user-agent", landed)
 
+    def test_global_default_opener_does_not_disable_protection(self):
+        # urllib.request.urlopen() installs a plain global opener on first use; any library
+        # in the process may trigger that. Credentials must still be stripped.
+        import urllib.request
+        previous = getattr(urllib.request, "_opener", None)
+        urllib.request.install_opener(urllib.request.build_opener())
+        try:
+            http_get(f"http://127.0.0.1:{self.a.server_port}/redirect-away",
+                     headers={"Authorization": "Basic c2VjcmV0"})
+        finally:
+            urllib.request.install_opener(previous)
+        landed = {k.lower(): v for k, v in self.hb.seen[-1][2].items()}
+        self.assertNotIn("authorization", landed)
+
     def test_same_origin_redirect_keeps_credentials(self):
         http_get(f"http://127.0.0.1:{self.a.server_port}/redirect-same",
                  headers={"Authorization": "Basic c2VjcmV0"})
@@ -112,7 +126,7 @@ class ErrorTests(unittest.TestCase):
     def test_truncated_response_is_retried_then_reported(self):
         calls = {"n": 0}
 
-        def boom(req, timeout):
+        def boom(req, timeout, opener=None):
             calls["n"] += 1
             raise http.client.IncompleteRead(b"partial")
 
