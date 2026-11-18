@@ -7,6 +7,7 @@ import io  # noqa: E402
 import json  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
+import time  # noqa: E402
 import unittest  # noqa: E402
 import zipfile  # noqa: E402
 from contextlib import redirect_stderr, redirect_stdout  # noqa: E402
@@ -522,6 +523,23 @@ class ReviewFindingTests(TempDirTestCase):
         self.assertEqual(wordpress_export.html_to_text(strip(text)), "A.\n\nKEEP ME.\n\nB.")
         self.assertEqual(wordpress_export.html_to_text(strip("<p>[Video of the rally] and [Audio: the speech]</p>")),
                          "[Video of the rally] and [Audio: the speech]")
+
+    def test_crafted_shortcodes_and_bylines_are_linear_time(self):
+        # Each took seconds at 20 KB and grew quadratically (tens of minutes for a few hundred KB).
+        strip, scrub = wordpress_export._strip_shortcodes, wordpress_export._scrub_name
+        started = time.monotonic()
+        for body in ("[a " + "=" * 300000, "[video " * 100000, "<!-- [a " + "=" * 300000 + " -->"):
+            strip(body)
+        scrub("a" * 300000 + "@" + "b" * 300000)
+        scrub("a@" + "b." * 300000)
+        self.assertLess(time.monotonic() - started, 5)
+        # Same results as before on ordinary content.
+        self.assertEqual(strip('[caption id="1" align="x"]<img/> Mayor speaks[/caption]').strip(), "<img/> Mayor speaks")
+        self.assertEqual(strip("[video src=a.mp4][/video]Text").strip(), "Text")
+        self.assertEqual(strip("[sic] and [Editor's note: x = y]"), "[sic] and [Editor's note: x = y]")
+        self.assertEqual(scrub("Mia Wong (mia@example.com)"), "Mia Wong")
+        self.assertEqual(scrub("jd@example.com"), "")
+        self.assertEqual(scrub("Kim Lee <kim.lee@news.example.org>"), "Kim Lee")
 
     def test_iso_8859_1_site_export_is_not_mojibake(self):
         # blog_charset ISO-8859-1: wxr_cdata() utf8_encode()s the text, so the CDATA is UTF-8 in a file

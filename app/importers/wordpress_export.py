@@ -992,12 +992,14 @@ _SC_MEDIA = ("embed", "video", "audio", "playlist", "wpvideo", "youtube", "vimeo
              "instagram", "googlemaps", "gallery")
 # [video]...[/video]. The body may not run past another opening tag of the same name: [video src=...] and
 # [youtube URL] can stand alone, and a lazy match from one of those to a later [/video] deleted the article
-# text in between.
-_SC_MEDIA_BLOCK = re.compile(r"\[(" + "|".join(_SC_MEDIA) + r")\b[^\]]*\](?:(?!\[\1\b).)*?\[/\1\]", re.I | re.S)
+# text in between. The opening tag can't contain "[": with [^\]]* every unclosed "[video " rescanned the rest
+# of the post (quadratic time on crafted content).
+_SC_MEDIA_BLOCK = re.compile(r"\[(" + "|".join(_SC_MEDIA) + r")\b[^\]\[]*\](?:(?!\[\1\b).)*?\[/\1\]", re.I | re.S)
 # A standalone media shortcode whose only argument is a URL: [youtube https://youtu.be/x]
 _SC_MEDIA_URL = re.compile(r"\[(?:" + "|".join(_SC_MEDIA) + r")\s+https?://[^\s\]\[]*\s*/?\]", re.I)
 _SC_CLOSING = re.compile(r"\[/(" + _SC_NAME + r")\]")
-_SC_WITH_ATTRS = re.compile(r"\[" + _SC_NAME + r"\s+[^\]\[]*=[^\]\[]*\]")
+# Up to the first "=", so there's one way to match: [^\]\[]*= backtracked quadratically over a run of "=".
+_SC_WITH_ATTRS = re.compile(r"\[" + _SC_NAME + r"\s+[^\]\[=]*=[^\]\[]*\]")
 # Page-builder and media shortcodes that stand alone: [vc_separator], [gallery], [et_pb_divider] ...
 _SC_STANDALONE = re.compile(r"\[(?:" + "|".join(_SC_MEDIA) + r"|[a-z]+_[\w-]*)\s*/?\]", re.I)
 
@@ -1073,7 +1075,9 @@ _ROLE_WORDS = {
     "chief", "associate", "assistant", "deputy", "managing", "metro", "sports", "business", "political",
     "investigative", "data", "digital", "web", "news", "photo", "video",
 }
-_EMAIL = re.compile(r"[^\s@()<>\[\],;:\"']+@[^\s@()<>\[\],;:\"']+\.[A-Za-z]{2,}")
+# The lookbehind starts a match only at the start of a run of address characters; otherwise every position
+# in a long run was tried, each rescanning to the end (quadratic time on crafted bylines).
+_EMAIL = re.compile(r"(?<![^\s@()<>\[\],;:\"'])[^\s@()<>\[\],;:\"']+@[^\s@()<>\[\],;:\"']+\.[A-Za-z]{2,}")
 
 
 def _is_role(part: str) -> bool:

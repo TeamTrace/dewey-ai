@@ -24,6 +24,7 @@ can change one option without re-entering everything.
 """
 import argparse
 import getpass
+import ipaddress
 import json
 import os
 import re
@@ -77,7 +78,11 @@ SECTIONS = [
     ]),
 ]
 SECRET_KEYS = {"ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "OPEN_LLM_API_KEY", "AZURE_OPENAI_API_KEY",
-               "AZURE_SEARCH_API_KEY", "AZURE_STORAGE_CONNECTION_STRING", "DATABASE_URL"}
+               "AZURE_SEARCH_API_KEY", "AZURE_STORAGE_CONNECTION_STRING", "DATABASE_URL", "POSTGRES_PASSWORD"}
+# Other names that hold a secret (POSTGRES_PASSWORD, WORDPRESS_APP_PASSWORD, GHOST_CONTENT_API_KEY, HF_TOKEN...).
+SECRET_NAME = re.compile(r"PASS|SECRET|TOKEN|KEY|CREDENTIAL|AUTH|CONNECTION_STRING|DATABASE_URL|DSN",
+                         re.IGNORECASE)
+KEPT_HEADER = "# Kept from your previous .env"
 
 
 # ---------------------------------------------------------------- terminal UI
@@ -168,8 +173,14 @@ def read_env(path: Path) -> dict:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             q = value[0]
             value = re.sub(r"\\([\\" + q + "])", r"\1", value[1:-1])
-        values[key.strip()] = value
+        values[env_key(key)] = value
     return values
+
+
+def env_key(text: str) -> str:
+    """The variable name in a KEY=value line, without the `export ` some .env files use (python-dotenv does too)."""
+    key = text.strip()
+    return key[len("export"):].strip() if re.match(r"export\s", key) else key
 
 
 def quote(value: str) -> str:
@@ -195,16 +206,30 @@ def render_env(values: dict, extra_existing: dict) -> str:
     # Keep anything already in .env that this installer doesn't manage.
     others = {k: v for k, v in extra_existing.items() if k not in written and k not in values}
     if others:
-        lines += ["", "# Kept from your previous .env"]
+        lines += ["", KEPT_HEADER]
         lines += [f"{k}={quote(v)}" for k, v in others.items()]
     return "\n".join(lines) + "\n"
 
 
+def is_secret(key: str) -> bool:
+    key = env_key(key)
+    return key in SECRET_KEYS or bool(SECRET_NAME.search(key))
+
+
 def redact(text: str) -> str:
-    out = []
+    """
+    The .env text for printing. Masks the secrets this installer manages, any
+    other key whose name looks like a secret, and every value kept from the
+    previous .env: this installer doesn't know what those hold.
+    """
+    out, kept = [], False
     for line in text.splitlines():
-        key = line.split("=", 1)[0]
-        out.append(f"{key}='********'" if key in SECRET_KEYS and "=" in line else line)
+        if line == KEPT_HEADER:
+            kept, line = True, f"{KEPT_HEADER} (values not shown here)"
+        key, sep, _ = line.partition("=")
+        if sep and not line.lstrip().startswith("#") and (kept or is_secret(key)):
+            line = f"{key}='********'"
+        out.append(line)
     return "\n".join(out)
 
 
@@ -334,6 +359,9 @@ def ask_open_llm(cur: dict, interactive: bool) -> dict:
     if base_url != OLLAMA_DEFAULT_URL:
         out["OPEN_LLM_API_KEY"] = ask_secret("API key for that server, if it needs one",
                                              cur.get("OPEN_LLM_API_KEY", ""))
+        if out["OPEN_LLM_API_KEY"] and sends_key_in_clear(base_url):
+            say("  Warning: that address uses http://, so the API key and every question would be sent")
+            say("  unencrypted. Use the server's https:// address unless it runs on this machine.")
     return out
 
 
@@ -421,9 +449,54 @@ def install_dependencies(values: dict) -> None:
         run(pip + ["-r", "requirements-local.txt"])
 
 
+def is_loopback(host: Optional[str]) -> bool:
+    host = (host or "").lower().rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def sends_key_in_clear(url: str) -> bool:
+    """True when a key sent to this address could be read on the network: plain http:// to another machine."""
+    try:
+        parts = urllib.parse.urlsplit(url.strip())
+        return parts.scheme.lower() == "http" and not is_loopback(parts.hostname)
+    except ValueError:
+        return False
+
+
+def _origin(url: str):
+    parts = urllib.parse.urlsplit(url)
+    default = {"http": 80, "https": 443}.get(parts.scheme.lower())
+    try:
+        port = parts.port or default
+    except ValueError:
+        port = default
+    return parts.scheme.lower(), (parts.hostname or "").lower(), port
+
+
+class _CredentialSafeRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow redirects, but never carry the Authorization header to another origin or down to http://
+    (urllib copies every header onto the redirected request). Same rule as app/importers/common.py."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and _origin(req.full_url) != _origin(new.full_url):
+            for store in (new.headers, new.unredirected_hdrs):
+                for name in [n for n in store if n.lower() in ("authorization", "proxy-authorization", "cookie")]:
+                    del store[name]
+        return new
+
+
+_CHECK_OPENER = urllib.request.build_opener(_CredentialSafeRedirects)
+
+
 def http_get_json(url: str, headers=None, timeout: float = 5.0):
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _CHECK_OPENER.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -445,17 +518,22 @@ def check_services(values: dict) -> None:
     if stack == "open":
         base = (values.get("OPEN_LLM_BASE_URL") or OLLAMA_DEFAULT_URL).rstrip("/")
         headers = {"Authorization": f"Bearer {values['OPEN_LLM_API_KEY']}"} if values.get("OPEN_LLM_API_KEY") else {}
-        try:
-            models = [m.get("id") for m in http_get_json(f"{base}/models", headers).get("data", [])]
-            want = values.get("OPEN_LLM_MODEL", "")
-            if want in models:
-                results.append(("Chat model server", f"ok, '{want}' is available"))
-            else:
-                hint = f" Run: ollama pull {want}" if base == OLLAMA_DEFAULT_URL.rstrip("/") else ""
-                results.append(("Chat model server", f"reachable, but '{want}' isn't listed "
-                                f"(found: {', '.join(models) or 'none'}).{hint}"))
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            results.append(("Chat model server", f"FAILED to reach {base}: {e}. Is Ollama running?"))
+        if headers and sends_key_in_clear(base):
+            # Refuse rather than send: anyone on the network path could read the key.
+            results.append(("Chat model server", f"NOT checked: {base} uses http://, so the API key would be sent "
+                            "unencrypted. Use the server's https:// address (http:// is only safe on this machine)."))
+        else:
+            try:
+                models = [m.get("id") for m in http_get_json(f"{base}/models", headers).get("data", [])]
+                want = values.get("OPEN_LLM_MODEL", "")
+                if want in models:
+                    results.append(("Chat model server", f"ok, '{want}' is available"))
+                else:
+                    hint = f" Run: ollama pull {want}" if base == OLLAMA_DEFAULT_URL.rstrip("/") else ""
+                    results.append(("Chat model server", f"reachable, but '{want}' isn't listed "
+                                    f"(found: {', '.join(models) or 'none'}).{hint}"))
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                results.append(("Chat model server", f"FAILED to reach {base}: {e}. Is Ollama running?"))
 
     if stack in ("anthropic", "open") and values.get("DATABASE_URL"):
         try:

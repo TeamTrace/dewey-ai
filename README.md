@@ -93,7 +93,7 @@ Every component runs on hardware you control, with no accounts or API keys:
 |---|---|---|
 | Chat model | Any open-weight model on an OpenAI-compatible server. Examples: [Qwen3-8B](https://hf.co/Qwen/Qwen3-8B) (8B parameters), [gpt-oss-20b](https://hf.co/openai/gpt-oss-20b) (21B parameters) | Apache 2.0 (both examples) |
 | Model server | [Ollama](https://github.com/ollama/ollama) (default), or vLLM / llama.cpp's server | MIT (Ollama) |
-| Embeddings | [voyage-4-nano](https://hf.co/MongoDB/voyage-4-nano), 347M parameters, run via the `voyageai` SDK's local mode | Apache 2.0 |
+| Embeddings | [voyage-4-nano](https://hf.co/MongoDB/voyage-4-nano), 347M parameters, run via sentence-transformers the way the `voyageai` SDK's local mode runs it | Apache 2.0 |
 | Reranker | [bge-reranker-v2-m3](https://hf.co/BAAI/bge-reranker-v2-m3), 568M parameters, run via sentence-transformers | Apache 2.0 |
 | Database | PostgreSQL + [pgvector](https://github.com/pgvector/pgvector) | PostgreSQL License (Postgres); see the pgvector repo |
 | Python libraries | gradio, openai (client only), voyageai, sentence-transformers, psycopg, pgvector, pydantic | Apache 2.0 / MIT / BSD, except psycopg (LGPL-3.0) |
@@ -123,7 +123,9 @@ Steps:
    DATABASE_URL="postgresql://user:password@localhost:5432/dewey"
    NEWSROOM_NAME="Your Newsroom"      # optional, see .env.template
    ```
-4. **Follow the common setup above.** The first run of `app/setup_postgres.py` downloads the embedding model (and the first question downloads the reranker) from Hugging Face into `~/.cache/huggingface`. After that, everything runs offline except for reaching your own Postgres and model server.
+4. **Follow the common setup above.** The first run of `app/setup_postgres.py` downloads the embedding model (and the first question downloads the reranker) from Hugging Face into `~/.cache/huggingface`. After that, Dewey loads both from that cache at the version first downloaded and doesn't check Hugging Face for a newer one, so it needs no network except to reach your own Postgres and model server.
+
+   voyage-4-nano's repository includes Python code that runs when the model loads (Hugging Face's `trust_remote_code`), inside the process that holds your keys and sees every question. That is why Dewey never updates it on its own. To choose the version yourself, set `EMBED_MODEL_REVISION` (and `RERANK_MODEL_REVISION` for the reranker) in `.env` to a commit hash from the model's Hugging Face page whose files you have reviewed. To update, set a newer commit, or delete the model from the cache. To rule out any request to Hugging Face once the models are downloaded, also set `HF_HUB_OFFLINE=1` in the environment that starts Dewey (not in `.env`: it is read before `.env` is loaded). `EMBEDDING_PROVIDER=local` only ever runs voyage-4-nano; Dewey refuses to start if `EMBED_MODEL` names a hosted Voyage model, rather than send questions to Voyage AI.
 
 What to expect, honestly:
 - **Answer quality** depends mostly on the chat model. Small local models are more likely than Claude or GPT-class models to miss a citation, cite the wrong source, or ignore the "say you can't answer" rule. Check citations against the linked articles before relying on an answer.

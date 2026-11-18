@@ -12,6 +12,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import re
@@ -730,6 +731,37 @@ class ReviewFileTests(unittest.TestCase):
         story = (b'<link rel="alternate" type="application/rss+xml" title="Example &raquo; Budget vote '
                  b'Comments Feed" href="https://dailyexample.test/2024/03/05/budget-vote/feed/">')
         self.assertIsNone(feed._discover_feed("https://dailyexample.test/2024/03/05/budget-vote/", story))
+
+
+class YoastFooterTests(unittest.TestCase):
+    FOOTER = ('<p>The post <a href="https://news.example/a/">A</a> appeared first on '
+              '<a href="https://news.example">News</a>.</p>')
+
+    def test_footer_removed_only_when_it_is_the_last_paragraph(self):
+        strip = feed._strip_yoast_footer
+        self.assertEqual(strip("<p>Body.</p>\n" + self.FOOTER + "\n"), "<p>Body.</p>")
+        self.assertEqual(strip("<p>Body.</p>" + self.FOOTER.upper()), "<p>Body.</p>")
+        kept = [self.FOOTER + "<p>More.</p>",  # not last
+                "<p>The post <a href=x>A</a> was updated.</p>",  # not the footer
+                "<p>Body.</p><p>The post <a href=x>A</a></p> appeared first on X.</p>"]  # spans paragraphs
+        for html in kept:
+            self.assertEqual(strip(html), html)
+
+    def test_crafted_content_is_linear_time(self):
+        # One HTML-escaped item like this took 35 s at 21 KB (cubic backtracking: about 2 hours at 100 KB).
+        payload = "<p>The post <a appeared first on " * 20000  # 660 KB
+        for html in (payload, payload + "</p>", "<p>The post <a " + "appeared first on " * 50000 + "</p>x"):
+            item = (f'<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>'
+                    f'<link>https://news.example/</link><item><title>T</title><link>https://news.example/t/</link>'
+                    f'<pubDate>Tue, 05 Mar 2024 14:30:00 +0000</pubDate>'
+                    f'<content:encoded><![CDATA[{html}]]></content:encoded></item></channel></rss>')
+            with tempfile.TemporaryDirectory() as tmp:
+                path = pathlib.Path(tmp, "feed.xml")
+                path.write_text(item, encoding="utf-8")
+                started = time.monotonic()
+                raws, _ = run_feed(["--file", str(path)])
+                self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(len(raws), 1)
 
 
 if __name__ == "__main__":

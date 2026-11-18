@@ -108,9 +108,10 @@ _ENCODING_ALIASES = {
 }
 _EMAIL = re.compile(r"[^\s()<>\[\]]+@[^\s()<>\[\]]+")
 _BY_PREFIX = re.compile(r"^by\s+", re.IGNORECASE)
-# Yoast SEO's "The post X appeared first on Site." footer, appended to every item's content.
-_YOAST_FOOTER = re.compile(r"\s*<p>\s*The post\s+<a\b(?:(?!</p>).)*?appeared first on(?:(?!</p>).)*</p>\s*$",
-                           re.IGNORECASE | re.DOTALL)
+# Yoast SEO's "The post X appeared first on Site." footer, appended to every item's content: a last
+# paragraph that starts like this and contains "appeared first on". Found with _strip_yoast_footer,
+# not one regex over the whole body: that backtracked cubically on crafted content (hours per item).
+_YOAST_FOOTER_START = re.compile(r"<p>\s*The post\s+<a\b", re.IGNORECASE)
 _PROTECTED_MARKERS = ("post-password-form", "There is no excerpt because this is a protected post.")
 _TRUNCATED_END = re.compile(r"(\[\s*(?:…|\.\.\.)\s*\]|…|\.\.\.|continue reading\W*|read more\W*)$", re.IGNORECASE)
 
@@ -1035,8 +1036,24 @@ def _convert(el: ET.Element, base: str, doc: _FeedDoc, opts: _Options, stats: _S
     if parts.get("content") is not None:
         raw["content"] = parts["content"]
     else:
-        raw["content_html"] = _YOAST_FOOTER.sub("", content_html)
+        raw["content_html"] = _strip_yoast_footer(content_html)
     return raw, item_id
+
+
+def _strip_yoast_footer(html: str) -> str:
+    """Remove a trailing '<p>The post <a ...>X</a> appeared first on <a ...>Site</a>.</p>'. Linear time."""
+    body = html.rstrip()
+    lower = body.lower()
+    if not lower.endswith("</p>"):
+        return html
+    close = len(body) - len("</p>")
+    # The footer is the last paragraph: it can't contain another </p>.
+    start = lower.rfind("</p>", 0, close)
+    start = start + len("</p>") if start >= 0 else 0
+    m = _YOAST_FOOTER_START.search(body, start, close)
+    if not m or "appeared first on" not in lower[m.end():close]:
+        return html
+    return body[:m.start()].rstrip()
 
 
 def _rss_item(el: ET.Element, base: str, doc: _FeedDoc) -> Dict[str, Any]:
