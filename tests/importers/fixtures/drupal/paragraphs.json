@@ -1,0 +1,193 @@
+[
+  {
+    "type": "paragraph--text",
+    "id": "e8f7d6c5-b4a3-4921-8f0e-000000000201",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/paragraph/text/e8f7d6c5-b4a3-4921-8f0e-000000000201?resourceVersion=id%3A1201"
+      }
+    },
+    "attributes": {
+      "drupal_internal__id": 201,
+      "drupal_internal__revision_id": 1201,
+      "langcode": "en",
+      "status": true,
+      "created": "2024-03-10T06:00:00+00:00",
+      "parent_id": "101",
+      "parent_type": "node",
+      "parent_field_name": "field_paragraphs",
+      "behavior_settings": [],
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "field_text": {
+        "value": "<p>Paragraph one: the council&rsquo;s vote followed a three-hour hearing.</p>",
+        "format": "full_html",
+        "processed": "<p>Paragraph one: the council&rsquo;s vote followed a three-hour hearing.</p>",
+        "summary": ""
+      }
+    },
+    "relationships": {
+      "paragraph_type": {
+        "data": {
+          "type": "paragraphs_type--paragraphs_type",
+          "id": "3e2d1c0b-a9f8-4e7d-8c6b-5a4f3e2d1c0b",
+          "meta": {
+            "drupal_internal__target_id": "text"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "paragraph--image",
+    "id": "e8f7d6c5-b4a3-4921-8f0e-000000000202",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/paragraph/image/e8f7d6c5-b4a3-4921-8f0e-000000000202?resourceVersion=id%3A1202"
+      }
+    },
+    "attributes": {
+      "drupal_internal__id": 202,
+      "drupal_internal__revision_id": 1202,
+      "langcode": "en",
+      "status": true,
+      "created": "2024-03-10T06:00:00+00:00",
+      "parent_id": "101",
+      "parent_type": "node",
+      "parent_field_name": "field_paragraphs",
+      "behavior_settings": [],
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "field_caption": "Council members at Thursday's vote."
+    },
+    "relationships": {
+      "paragraph_type": {
+        "data": {
+          "type": "paragraphs_type--paragraphs_type",
+          "id": "3e2d1c0b-a9f8-4e7d-8c6b-5a4f3e2d1c0b",
+          "meta": {
+            "drupal_internal__target_id": "image"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "paragraph--pull_quote",
+    "id": "e8f7d6c5-b4a3-4921-8f0e-000000000203",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/paragraph/pull_quote/e8f7d6c5-b4a3-4921-8f0e-000000000203?resourceVersion=id%3A1203"
+      }
+    },
+    "attributes": {
+      "drupal_internal__id": 203,
+      "drupal_internal__revision_id": 1203,
+      "langcode": "en",
+      "status": true,
+      "created": "2024-03-10T06:00:00+00:00",
+      "parent_id": "101",
+      "parent_type": "node",
+      "parent_field_name": "field_paragraphs",
+      "behavior_settings": [],
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "field_quote": {
+        "value": "<blockquote><p>We heard every neighborhood.</p></blockquote>",
+        "format": "basic_html",
+        "processed": "<blockquote><p>We heard every neighborhood.</p></blockquote>",
+        "summary": ""
+      },
+      "field_attribution": "Councilmember Diaz"
+    },
+    "relationships": {
+      "paragraph_type": {
+        "data": {
+          "type": "paragraphs_type--paragraphs_type",
+          "id": "3e2d1c0b-a9f8-4e7d-8c6b-5a4f3e2d1c0b",
+          "meta": {
+            "drupal_internal__target_id": "pull_quote"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "paragraph--text",
+    "id": "e8f7d6c5-b4a3-4921-8f0e-000000000204",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/paragraph/text/e8f7d6c5-b4a3-4921-8f0e-000000000204?resourceVersion=id%3A1204"
+      }
+    },
+    "attributes": {
+      "drupal_internal__id": 204,
+      "drupal_internal__revision_id": 1204,
+      "langcode": "en",
+      "status": true,
+      "created": "2024-03-10T06:00:00+00:00",
+      "parent_id": "101",
+      "parent_type": "node",
+      "parent_field_name": "field_paragraphs",
+      "behavior_settings": [],
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "field_text": {
+        "value": "<p>Phase one starts in September.</p>",
+        "format": "basic_html",
+        "processed": "<p>Phase one starts in September.</p>",
+        "summary": ""
+      }
+    },
+    "relationships": {
+      "paragraph_type": {
+        "data": {
+          "type": "paragraphs_type--paragraphs_type",
+          "id": "3e2d1c0b-a9f8-4e7d-8c6b-5a4f3e2d1c0b",
+          "meta": {
+            "drupal_internal__target_id": "text"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "paragraph--text",
+    "id": "e8f7d6c5-b4a3-4921-8f0e-000000000205",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/paragraph/text/e8f7d6c5-b4a3-4921-8f0e-000000000205?resourceVersion=id%3A1205"
+      }
+    },
+    "attributes": {
+      "drupal_internal__id": 205,
+      "drupal_internal__revision_id": 1205,
+      "langcode": "en",
+      "status": false,
+      "created": "2024-03-10T06:00:00+00:00",
+      "parent_id": "101",
+      "parent_type": "node",
+      "parent_field_name": "field_paragraphs",
+      "behavior_settings": [],
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "field_text": {
+        "value": "<p>Unpublished paragraph text.</p>",
+        "format": "basic_html",
+        "processed": "<p>Unpublished paragraph text.</p>",
+        "summary": ""
+      }
+    },
+    "relationships": {
+      "paragraph_type": {
+        "data": {
+          "type": "paragraphs_type--paragraphs_type",
+          "id": "3e2d1c0b-a9f8-4e7d-8c6b-5a4f3e2d1c0b",
+          "meta": {
+            "drupal_internal__target_id": "text"
+          }
+        }
+      }
+    }
+  }
+]

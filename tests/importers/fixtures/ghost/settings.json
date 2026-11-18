@@ -1,0 +1,65 @@
+{
+ "settings": {
+  "title": "The Harbor Ledger",
+  "description": "Nonprofit local news for Harbor City.",
+  "logo": null,
+  "icon": null,
+  "accent_color": "#0B5394",
+  "cover_image": null,
+  "facebook": null,
+  "twitter": "@harborledger",
+  "lang": "en",
+  "locale": "en",
+  "timezone": "America/New_York",
+  "codeinjection_head": null,
+  "codeinjection_foot": null,
+  "navigation": [
+   {
+    "label": "Home",
+    "url": "/"
+   },
+   {
+    "label": "About",
+    "url": "/about/"
+   }
+  ],
+  "secondary_navigation": [],
+  "meta_title": null,
+  "meta_description": null,
+  "og_image": null,
+  "og_title": null,
+  "og_description": null,
+  "twitter_image": null,
+  "twitter_title": null,
+  "twitter_description": null,
+  "members_support_address": "noreply",
+  "members_enabled": true,
+  "allow_self_signup": true,
+  "members_invite_only": false,
+  "members_signup_access": "all",
+  "paid_members_enabled": true,
+  "firstpromoter_account": null,
+  "portal_button_style": "icon-and-text",
+  "portal_button_signup_text": "Subscribe",
+  "portal_button_icon": null,
+  "portal_signup_terms_html": null,
+  "portal_signup_checkbox_required": false,
+  "portal_plans": [
+   "free",
+   "monthly",
+   "yearly"
+  ],
+  "portal_default_plan": "yearly",
+  "portal_name": true,
+  "portal_button": true,
+  "comments_enabled": "off",
+  "recommendations_enabled": false,
+  "outbound_link_tagging": true,
+  "default_email_address": "noreply@harborledger.example",
+  "support_email_address": "noreply@harborledger.example",
+  "editor_default_email_recipients": "visibility",
+  "url": "https://news.harborledger.example/",
+  "version": "6.4"
+ },
+ "meta": {}
+}

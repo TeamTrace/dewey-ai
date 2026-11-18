@@ -1,0 +1,1330 @@
+[
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000101",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101?resourceVersion=id%3A404"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 101,
+      "drupal_internal__vid": 404,
+      "langcode": "en",
+      "revision_timestamp": "2024-03-10T06:30:00+00:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Council approves $2M budget &amp; new parks plan",
+      "created": "2024-03-10T06:30:00+00:00",
+      "changed": "2024-03-10T06:30:00+00:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/03/council-approves-budget",
+        "pid": 141,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>The City Council voted 9-2 on Thursday&nbsp;to approve a $2 million budget.</p>\r\n<p>The plan adds three parks in &ldquo;underserved&rdquo; neighborhoods.</p>",
+        "format": "full_html",
+        "processed": "<p>The City Council voted 9-2 on Thursday&nbsp;to approve a $2 million budget.</p>\n<p>The plan adds three parks in &ldquo;underserved&rdquo; neighborhoods.</p>\n<script>window.dataLayer.push({event: 'article'});</script>",
+        "summary": ""
+      },
+      "field_byline": "By Maria Lopez",
+      "field_display_date": "2024-03-09T21:15:00-05:00"
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000005",
+          "meta": {
+            "drupal_internal__target_id": 5
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000031",
+            "meta": {
+              "drupal_internal__target_id": 31
+            }
+          },
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000032",
+            "meta": {
+              "drupal_internal__target_id": 32
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [
+          {
+            "type": "paragraph--text",
+            "id": "e8f7d6c5-b4a3-4921-8f0e-000000000201",
+            "meta": {
+              "target_revision_id": 1201,
+              "drupal_internal__target_id": 201
+            }
+          },
+          {
+            "type": "paragraph--image",
+            "id": "e8f7d6c5-b4a3-4921-8f0e-000000000202",
+            "meta": {
+              "target_revision_id": 1202,
+              "drupal_internal__target_id": 202
+            }
+          },
+          {
+            "type": "paragraph--pull_quote",
+            "id": "e8f7d6c5-b4a3-4921-8f0e-000000000203",
+            "meta": {
+              "target_revision_id": 1203,
+              "drupal_internal__target_id": 203
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000101/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000102",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102?resourceVersion=id%3A408"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 102,
+      "drupal_internal__vid": 408,
+      "langcode": "en",
+      "revision_timestamp": "2024-03-11T09:05:00-05:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Caf&eacute; owners rally against new parking rules",
+      "created": "2024-03-11T09:05:00-05:00",
+      "changed": "2024-03-11T09:05:00-05:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": null,
+        "pid": null,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>Owners of six caf&eacute;s on Passyunk Avenue said the rules would cost them customers.</p>",
+        "format": "basic_html",
+        "processed": "<p>Owners of six caf&eacute;s on Passyunk Avenue said the rules would cost them customers.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000000",
+          "meta": {
+            "drupal_internal__target_id": 0
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000102/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000103",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103?resourceVersion=id%3A412"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 103,
+      "drupal_internal__vid": 412,
+      "langcode": "en",
+      "revision_timestamp": "2024-03-12T12:00:00+00:00",
+      "revision_log": null,
+      "status": false,
+      "title": "DRAFT: Budget follow-up",
+      "created": "2024-03-12T12:00:00+00:00",
+      "changed": "2024-03-12T12:00:00+00:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/03/budget-follow-up",
+        "pid": 143,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>Unpublished draft text.</p>",
+        "format": "basic_html",
+        "processed": "<p>Unpublished draft text.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000005",
+          "meta": {
+            "drupal_internal__target_id": 5
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000031",
+            "meta": {
+              "drupal_internal__target_id": 31
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000103/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000104",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104?resourceVersion=id%3A416"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 104,
+      "drupal_internal__vid": 416,
+      "langcode": "en",
+      "revision_timestamp": "2024-03-13T15:00:00+00:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Subscriber exclusive: Inside the budget talks",
+      "created": "2024-03-13T15:00:00+00:00",
+      "changed": "2024-03-13T15:00:00+00:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/03/inside-budget-talks",
+        "pid": 144,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>Members-only reporting.</p>",
+        "format": "basic_html",
+        "processed": "<p>Members-only reporting.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000006",
+          "meta": {
+            "drupal_internal__target_id": 6
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000033",
+            "meta": {
+              "drupal_internal__target_id": 33
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000104/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000105",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105?resourceVersion=id%3A420"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 105,
+      "drupal_internal__vid": 420,
+      "langcode": "en",
+      "revision_timestamp": "2024-03-14T10:00:00+00:00",
+      "revision_log": null,
+      "status": true,
+      "title": null,
+      "created": "2024-03-14T10:00:00+00:00",
+      "changed": "2024-03-14T10:00:00+00:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/03/untitled",
+        "pid": 145,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>A node whose title did not come through.</p>",
+        "format": "basic_html",
+        "processed": "<p>A node whose title did not come through.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000005",
+          "meta": {
+            "drupal_internal__target_id": 5
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000105/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000106",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106?resourceVersion=id%3A424"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 106,
+      "drupal_internal__vid": 424,
+      "langcode": "en",
+      "revision_timestamp": "2024-03-15T10:00:00+00:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Photo gallery: Spring flower show",
+      "created": "2024-03-15T10:00:00+00:00",
+      "changed": "2024-03-15T10:00:00+00:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/03/flower-show-gallery",
+        "pid": 146,
+        "langcode": "en"
+      },
+      "body": null,
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000006",
+          "meta": {
+            "drupal_internal__target_id": 6
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000106/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000107",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107?resourceVersion=id%3A428"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 107,
+      "drupal_internal__vid": 428,
+      "langcode": "en",
+      "revision_timestamp": null,
+      "revision_log": null,
+      "status": true,
+      "title": "Transit strike enters second week",
+      "created": null,
+      "changed": null,
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/03/transit-strike",
+        "pid": 147,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>Bus and trolley service remained suspended.</p>",
+        "format": "basic_html",
+        "processed": "<p>Bus and trolley service remained suspended.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000006",
+          "meta": {
+            "drupal_internal__target_id": 6
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000107/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000108",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108?resourceVersion=id%3A432"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 108,
+      "drupal_internal__vid": 432,
+      "langcode": "es",
+      "revision_timestamp": "2023-11-05T01:30:00-04:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Abre el nuevo café en Fishtown",
+      "created": "2023-11-05T01:30:00-04:00",
+      "changed": "2023-11-05T01:30:00-04:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/noticias/abre-café fishtown",
+        "pid": 148,
+        "langcode": "es"
+      },
+      "body": {
+        "value": "<p>El caf&eacute; abri&oacute; sus puertas el s&aacute;bado.</p>",
+        "format": "basic_html",
+        "processed": "<p>El caf&eacute; abri&oacute; sus puertas el s&aacute;bado.</p>",
+        "summary": ""
+      },
+      "field_byline": "Jae Kim",
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000006",
+          "meta": {
+            "drupal_internal__target_id": 6
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000033",
+            "meta": {
+              "drupal_internal__target_id": 33
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000108/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000109",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109?resourceVersion=id%3A436"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 109,
+      "drupal_internal__vid": 436,
+      "langcode": "en",
+      "revision_timestamp": "2024-04-01T23:30:00-07:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Water main break floods Kensington block",
+      "created": "2024-04-01T23:30:00-07:00",
+      "changed": "2024-04-01T23:30:00-07:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/04/water-main-break",
+        "pid": 149,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>Crews shut off water to 40 homes.</p>",
+        "format": "basic_html",
+        "processed": "<p>Crews shut off water to 40 homes.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": null
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "missing",
+          "meta": {
+            "links": {
+              "help": {
+                "href": "https://www.drupal.org/docs/8/modules/json-api/core-concepts#missing",
+                "meta": {
+                  "about": "Usage and meaning of the 'missing' resource identifier."
+                }
+              }
+            }
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000109/relationships/field_tags"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "node--article",
+    "id": "5e7d1a3c-2b4f-4c6d-9e8f-000000000110",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110?resourceVersion=id%3A440"
+      }
+    },
+    "attributes": {
+      "drupal_internal__nid": 110,
+      "drupal_internal__vid": 440,
+      "langcode": "en",
+      "revision_timestamp": "2024-04-15T16:00:00+00:00",
+      "revision_log": null,
+      "status": true,
+      "title": "Schools chief outlines reopening plan",
+      "created": "2024-04-15T16:00:00+00:00",
+      "changed": "2024-04-15T16:00:00+00:00",
+      "promote": true,
+      "sticky": false,
+      "default_langcode": true,
+      "revision_translation_affected": true,
+      "path": {
+        "alias": "/news/2024/04/schools-reopening",
+        "pid": 150,
+        "langcode": "en"
+      },
+      "body": {
+        "value": "<p>The superintendent presented a three-phase plan.</p>",
+        "format": "basic_html",
+        "processed": "<p>The superintendent presented a three-phase plan.</p>",
+        "summary": ""
+      },
+      "field_byline": null,
+      "field_display_date": "2024-01-02T09:00:00-05:00"
+    },
+    "relationships": {
+      "node_type": {
+        "data": {
+          "type": "node_type--node_type",
+          "id": "0d6f2a3e-ff6c-4b5e-a1d2-3c4b5a697887",
+          "meta": {
+            "drupal_internal__target_id": "article"
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/node_type"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/relationships/node_type"
+          }
+        }
+      },
+      "revision_uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000001",
+          "meta": {
+            "drupal_internal__target_id": 1
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/revision_uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/relationships/revision_uid"
+          }
+        }
+      },
+      "uid": {
+        "data": {
+          "type": "user--user",
+          "id": "9b1f6c2e-0000-4000-8000-000000000006",
+          "meta": {
+            "drupal_internal__target_id": 6
+          }
+        },
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/uid"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/relationships/uid"
+          }
+        }
+      },
+      "field_authors": {
+        "data": [
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000033",
+            "meta": {
+              "drupal_internal__target_id": 33
+            }
+          },
+          {
+            "type": "taxonomy_term--authors",
+            "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000034",
+            "meta": {
+              "drupal_internal__target_id": 34
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/field_authors"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/relationships/field_authors"
+          }
+        }
+      },
+      "field_paragraphs": {
+        "data": [
+          {
+            "type": "paragraph--text",
+            "id": "e8f7d6c5-b4a3-4921-8f0e-000000000204",
+            "meta": {
+              "target_revision_id": 1204,
+              "drupal_internal__target_id": 204
+            }
+          },
+          {
+            "type": "paragraph--text",
+            "id": "e8f7d6c5-b4a3-4921-8f0e-000000000205",
+            "meta": {
+              "target_revision_id": 1205,
+              "drupal_internal__target_id": 205
+            }
+          }
+        ],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/field_paragraphs"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/relationships/field_paragraphs"
+          }
+        }
+      },
+      "field_tags": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/field_tags"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/node/article/5e7d1a3c-2b4f-4c6d-9e8f-000000000110/relationships/field_tags"
+          }
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Newsroom</title>
+  <id>tag:atom.example.org,2024:feed</id>
+  <updated>2024-04-02T14:00:00Z</updated>
+  <link rel="self" href="atom.xml?page=2"/>
+  <link rel="first" href="atom.xml"/>
+  <link rel="previous" href="atom.xml"/>
+  <link rel="prev-archive" href="archive/2023.xml"/>
+  <author><name>Example Newsroom</name></author>
+
+  <entry>
+    <title>School board picks new superintendent</title>
+    <link rel="alternate" type="text/html" href="https://atom.example.org/news/2024/03/superintendent"/>
+    <link rel="alternate" type="application/json" href="https://atom.example.org/api/stories/4980.json"/>
+    <id>tag:atom.example.org,2024:story-4980</id>
+    <published>2024-03-20T08:00:00.000-07:00</published>
+    <updated>2024-03-21T08:00:00-07:00</updated>
+    <author><name>Sam Park</name></author>
+    <content type="html">&lt;p&gt;The board voted 5-2.&lt;/p&gt;</content>
+  </entry>
+
+  <entry>
+    <link rel="alternate" href="https://atom.example.org/news/2024/03/untitled"/>
+    <id>tag:atom.example.org,2024:story-4979</id>
+    <published>2024-03-19T08:00:00Z</published>
+    <updated>2024-03-19T08:00:00Z</updated>
+    <content type="html">&lt;p&gt;No title on this one.&lt;/p&gt;</content>
+  </entry>
+</feed>

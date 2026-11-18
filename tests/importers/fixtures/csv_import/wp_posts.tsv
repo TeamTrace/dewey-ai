@@ -1,0 +1,18 @@
+ID	post_author	post_date	post_date_gmt	post_content	post_title	post_excerpt	post_status	post_password	post_name	post_type	permalink	guid
+501	3	2024-05-01 09:30:00	2024-05-01 13:30:00	"<!-- wp:paragraph -->
+<p>Voters head to the polls on Tuesday.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Polls close at 8&nbsp;p.m. See <a href=""https://example.com/vote"">where to vote</a>.</p>
+<!-- /wp:paragraph -->"	Primary day &#8211; what to know		publish		primary-day	post	https://example.com/2024/05/01/primary-day/	https://example.com/?p=501
+502	3	2024-05-02 10:00:00	0000-00-00 00:00:00	<p>Draft text</p>	Draft about turnout		draft			post	https://example.com/?p=502	https://example.com/?p=502
+503	4	2024-05-02 11:00:00	2024-05-02 15:00:00	<p>Staff only.</p>	Newsroom memo		private		newsroom-memo	post	https://example.com/2024/05/02/newsroom-memo/	https://example.com/?p=503
+504	4	2024-05-03 08:00:00	2024-05-03 12:00:00	<p>Protected.</p>	Protected story		publish	hunter2	protected-story	post	https://example.com/2024/05/03/protected-story/	https://example.com/?p=504
+505	3	2024-05-01 09:31:00	2024-05-01 13:31:00	<p>Voters head to the polls.</p>	Primary day		inherit		501-revision-v1	revision	https://example.com/?p=505	https://example.com/?p=505
+506	1	2020-01-01 00:00:00	2020-01-01 05:00:00	<p>Who we are.</p>	About us		publish		about	page	https://example.com/about/	https://example.com/?page_id=506
+507	3	2030-01-01 09:00:00	2030-01-01 14:00:00	<p>Not yet.</p>	Scheduled preview		future		scheduled-preview	post	https://example.com/2030/01/01/scheduled-preview/	https://example.com/?p=507
+508	5	2023-11-07 20:15:00	2023-11-08 01:15:00	"Plain paragraph one.
+
+Plain paragraph two, sponsored by AT&amp;T."	Results: &quot;too close to call&quot;	Excerpt only	publish		results	post	https://example.com/2023/11/07/results/	https://example.com/?p=508
+509	1	2020-01-01 00:00:00	2020-01-01 05:00:00		Home		publish		home	nav_menu_item	https://example.com/home/	https://example.com/?p=509

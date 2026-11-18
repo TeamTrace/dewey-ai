@@ -1,0 +1,33 @@
+{
+ "name": "The Example Ledger",
+ "description": "News for Example County since 1887",
+ "url": "https://www.example-ledger.com",
+ "home": "https://www.example-ledger.com",
+ "gmt_offset": -5,
+ "timezone_string": "America/New_York",
+ "page_for_posts": 0,
+ "page_on_front": 0,
+ "show_on_front": "posts",
+ "namespaces": [
+  "oembed/1.0",
+  "coauthors/v1",
+  "wp/v2",
+  "wp-site-health/v1",
+  "wp-block-editor/v1"
+ ],
+ "authentication": {
+  "application-passwords": {
+   "endpoints": {
+    "authorization": "https://www.example-ledger.com/wp-admin/authorize-application.php"
+   }
+  }
+ },
+ "routes": {
+  "/": {"namespace": "", "methods": ["GET"], "endpoints": [{"methods": ["GET"], "args": {"context": {"default": "view", "required": false}}}], "_links": {"self": [{"href": "{{BASE}}/wp-json/"}]}},
+  "/wp/v2/posts": {"namespace": "wp/v2", "methods": ["GET", "POST"], "endpoints": [{"methods": ["GET"], "allow_batch": {"v1": true}, "args": {"per_page": {"description": "Maximum number of items to be returned in result set.", "type": "integer", "default": 10, "minimum": 1, "maximum": 100, "required": false}}}], "_links": {"self": [{"href": "{{BASE}}/wp-json/wp/v2/posts"}]}}
+ },
+ "site_logo": 0,
+ "site_icon": 41,
+ "site_icon_url": "https://www.example-ledger.com/wp-content/uploads/2021/02/cropped-ledger-icon.png",
+ "_links": {"help": [{"href": "https://developer.wordpress.org/rest-api/"}]}
+}

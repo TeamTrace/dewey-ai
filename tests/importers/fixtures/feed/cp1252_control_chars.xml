@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<channel>
+<title>Example Tribune</title>
+<link>https://tribune.example.com/</link>
+<description>Legacy CMS feed</description>
+<item>
+<title>“Not again” — residents on the boil-water notice</title>
+<link>https://tribune.example.com/stories/boil-water-notice</link>
+<description><![CDATA[<p>Residents of the north side were told to boil water for 48 hours.</p><p>It’s the third notice this year.</p>]]></description>
+<dc:creator>José Martínez</dc:creator>
+<pubDate>Thu, 07 Mar 2024 06:05:00 PST</pubDate>
+<guid>https://tribune.example.com/stories/boil-water-notice</guid>
+</item>
+</channel>
+</rss>

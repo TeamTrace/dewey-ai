@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:feedburner="http://rssnamespace.org/feedburner/ext/1.0">
+  <channel>
+    <title>Example Gazette</title>
+    <link>https://news.example.org</link>
+    <description>Latest stories</description>
+    <atom:link href="https://news.example.org/rss.xml" rel="self" type="application/rss+xml"/>
+    <atom:link href="https://news.example.org/rss.xml?page=1" rel="next" type="application/rss+xml"/>
+    <item>
+      <title>Port expansion approved</title>
+      <link>https://news.example.org/news/2024/02/port-expansion</link>
+      <description>&lt;p&gt;Commissioners approved the $400 million expansion.&lt;/p&gt;&lt;p&gt;Work starts in June.&lt;/p&gt;</description>
+      <author>jdoe@example.org (Jane Doe)</author>
+      <pubDate>Mon, 12 Feb 2024 16:45:00 +0000</pubDate>
+      <guid isPermaLink="false">48213 at https://news.example.org</guid>
+    </item>
+    <item>
+      <title>Weather service issues flood watch</title>
+      <link>https://news.example.org/news/2024/02/flood-watch</link>
+      <description>&lt;p&gt;Up to three inches of rain is expected.&lt;/p&gt;</description>
+      <author>desk@example.org</author>
+      <pubDate>Sun, 11 Feb 2024 07:00:00 -0800</pubDate>
+      <guid isPermaLink="false">48207</guid>
+    </item>
+    <item>
+      <title>Opinion: Fix the bridge</title>
+      <description>&lt;p&gt;The bridge has been closed for a year.&lt;/p&gt;</description>
+      <author>Lee Chen &lt;lchen@example.org&gt;</author>
+      <pubDate>Sat, 10 Feb 2024 12:00:00 GMT</pubDate>
+      <guid>https://news.example.org/opinion/2024/02/fix-the-bridge</guid>
+    </item>
+    <item>
+      <title>Museum reopens</title>
+      <link>/news/2024/02/museum-reopens</link>
+      <description>&lt;p&gt;The museum reopened after renovations.&lt;/p&gt;</description>
+      <pubDate>2024-02-10 08:30:00</pubDate>
+      <guid isPermaLink="false">48190</guid>
+    </item>
+    <item>
+      <title>Concert series announced for 2098</title>
+      <link>https://news.example.org/news/2098/01/concert-series</link>
+      <description>&lt;p&gt;Placeholder listing.&lt;/p&gt;</description>
+      <pubDate>Wed, 01 Jan 2098 00:00:00 +0000</pubDate>
+      <guid isPermaLink="false">48300</guid>
+    </item>
+    <item>
+      <title>Transit board meets</title>
+      <link>http://feedproxy.google.com/~r/ExampleGazette/~3/abc123/</link>
+      <feedburner:origLink>https://news.example.org/news/2024/02/transit-board</feedburner:origLink>
+      <description>&lt;p&gt;The board meets Thursday.&lt;/p&gt;</description>
+      <pubDate>Fri, 09 Feb 2024 09:00:00 +0000</pubDate>
+      <guid isPermaLink="false">48180</guid>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,5 @@
+id,slug,title,body,url,author,byline,published_at,created_at,updated_at,deleted_at,is_draft
+1,council-budget,Council passes budget,<p>The council passed the budget 9&ndash;8.</p>,https://news.example.com/2024/05/01/council-budget,jdoe,Jane Doe,2024-05-01 13:00:00+00,2024-04-30 18:00:00+00,2024-05-01 13:05:00+00,,f
+2,retracted-story,Retracted story,<p>This story was retracted.</p>,https://news.example.com/2024/05/02/retracted-story,jdoe,Jane Doe,2024-05-02 09:00:00+00,2024-05-02 08:00:00+00,2024-06-01 10:00:00+00,2024-06-01 10:00:00+00,f
+3,wip,Work in progress,<p>Not finished.</p>,https://news.example.com/2024/05/03/wip,alee,Ann Lee,2024-05-03 09:00:00+00,2024-05-03 08:00:00+00,2024-05-03 08:30:00+00,,t
+4,weekend-events,Weekend events,<p>Things to do this weekend.</p>,https://news.example.com/2024/05/04/weekend-events,alee,Ann Lee; Sam Rivera,2024-05-04 12:00:00+00,2024-05-03 20:00:00+00,2024-05-04 12:00:00+00,,f

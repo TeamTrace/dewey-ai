@@ -1,0 +1,130 @@
+[
+  {
+    "type": "user--user",
+    "id": "9b1f6c2e-0000-4000-8000-000000000000",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000000"
+      }
+    },
+    "attributes": {
+      "display_name": "Anonymous",
+      "drupal_internal__uid": 0,
+      "langcode": "en",
+      "preferred_langcode": "en",
+      "name": "",
+      "created": "2019-06-03T14:11:09+00:00",
+      "changed": "2019-06-03T14:11:09+00:00",
+      "status": false
+    },
+    "relationships": {
+      "roles": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000000/roles"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000000/relationships/roles"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "user--user",
+    "id": "9b1f6c2e-0000-4000-8000-000000000001",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000001"
+      }
+    },
+    "attributes": {
+      "display_name": "admin",
+      "drupal_internal__uid": 1,
+      "langcode": "en",
+      "preferred_langcode": "en",
+      "name": "admin",
+      "created": "2019-06-03T14:11:09+00:00",
+      "changed": "2019-06-03T14:11:09+00:00",
+      "status": true
+    },
+    "relationships": {
+      "roles": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000001/roles"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000001/relationships/roles"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "user--user",
+    "id": "9b1f6c2e-0000-4000-8000-000000000005",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000005"
+      }
+    },
+    "attributes": {
+      "display_name": "Maria Lopez",
+      "drupal_internal__uid": 5,
+      "langcode": "en",
+      "preferred_langcode": "en",
+      "name": "mlopez",
+      "created": "2019-06-03T14:11:09+00:00",
+      "changed": "2019-06-03T14:11:09+00:00",
+      "status": true
+    },
+    "relationships": {
+      "roles": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000005/roles"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000005/relationships/roles"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "user--user",
+    "id": "9b1f6c2e-0000-4000-8000-000000000006",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000006"
+      }
+    },
+    "attributes": {
+      "display_name": "Jae Kim",
+      "drupal_internal__uid": 6,
+      "langcode": "en",
+      "preferred_langcode": "en",
+      "name": "jkim",
+      "created": "2019-06-03T14:11:09+00:00",
+      "changed": "2019-06-03T14:11:09+00:00",
+      "status": true
+    },
+    "relationships": {
+      "roles": {
+        "data": [],
+        "links": {
+          "related": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000006/roles"
+          },
+          "self": {
+            "href": "{{BASE}}/jsonapi/user/user/9b1f6c2e-0000-4000-8000-000000000006/relationships/roles"
+          }
+        }
+      }
+    }
+  }
+]

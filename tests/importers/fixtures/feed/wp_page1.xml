@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	xmlns:sy="http://purl.org/rss/1.0/modules/syndication/"
+	xmlns:slash="http://purl.org/rss/1.0/modules/slash/"
+	>
+
+<channel>
+	<title>The Daily Example</title>
+	<atom:link href="https://dailyexample.test/feed/" rel="self" type="application/rss+xml" />
+	<link>https://dailyexample.test</link>
+	<description>News from Example County</description>
+	<lastBuildDate>Tue, 05 Mar 2024 15:02:11 +0000</lastBuildDate>
+	<language>en-US</language>
+	<sy:updatePeriod>
+	hourly	</sy:updatePeriod>
+	<sy:updateFrequency>
+	1	</sy:updateFrequency>
+	<generator>https://wordpress.org/?v=6.4.3</generator>
+
+<image>
+	<url>https://dailyexample.test/wp-content/uploads/2023/01/cropped-icon-32x32.png</url>
+	<title>The Daily Example</title>
+	<link>https://dailyexample.test</link>
+	<width>32</width>
+	<height>32</height>
+</image> 
+	<item>
+		<title>Council&#8217;s budget vote: &#8220;We&#8217;re not done&#8221;</title>
+		<link>https://dailyexample.test/2024/03/05/council-budget-vote/</link>
+					<comments>https://dailyexample.test/2024/03/05/council-budget-vote/#respond</comments>
+		
+		<dc:creator><![CDATA[Jane Doe]]></dc:creator>
+		<pubDate>Tue, 05 Mar 2024 14:30:00 +0000</pubDate>
+				<category><![CDATA[Politics]]></category>
+		<guid isPermaLink="false">https://dailyexample.test/?p=101</guid>
+
+					<description><![CDATA[The council approved a $2.1 billion budget on Tuesday after a six-hour session. Members said talks would continue &#8230; <a href="https://dailyexample.test/2024/03/05/council-budget-vote/" class="more-link">Continue reading</a>]]></description>
+										<content:encoded><![CDATA[<p>The council approved a $2.1 billion budget on Tuesday after a six-hour session.</p>
+<p>&#8220;We&#8217;re not done,&#8221; said Council President Maria Lopez.</p>
+<script type="text/javascript">trackView(101);</script>
+<p>The post <a href="https://dailyexample.test/2024/03/05/council-budget-vote/">Council&#8217;s budget vote: &#8220;We&#8217;re not done&#8221;</a> appeared first on <a href="https://dailyexample.test">The Daily Example</a>.</p>
+]]></content:encoded>
+					<wfw:commentRss>https://dailyexample.test/2024/03/05/council-budget-vote/feed/</wfw:commentRss>
+			<slash:comments>0</slash:comments>
+		</item>
+		<item>
+		<title>Q&amp;amp;A: The new schools chief on &lt;em&gt;reading scores&lt;/em&gt;</title>
+		<link>https://dailyexample.test/2024/03/04/schools-chief-qa/</link>
+		<dc:creator><![CDATA[Jane Doe]]></dc:creator>
+		<dc:creator><![CDATA[By John Roe]]></dc:creator>
+		<pubDate>Mon, 04 Mar 2024 09:00:00 EST</pubDate>
+				<category><![CDATA[Education]]></category>
+		<guid isPermaLink="false">https://dailyexample.test/?p=99</guid>
+
+					<description><![CDATA[Superintendent Dana Wu talks about literacy.]]></description>
+										<content:encoded><![CDATA[<p>Superintendent Dana Wu sat down with us to talk about literacy.</p>
+<ul><li>Reading scores rose 4 points.</li><li>Math was flat.</li></ul>
+]]></content:encoded>
+		</item>
+		<item>
+		<title>Protected: Budget memo</title>
+		<link>https://dailyexample.test/2024/03/04/budget-memo/</link>
+		<dc:creator><![CDATA[Jane Doe]]></dc:creator>
+		<pubDate>Mon, 04 Mar 2024 08:00:00 +0000</pubDate>
+		<guid isPermaLink="false">https://dailyexample.test/?p=98</guid>
+					<description><![CDATA[There is no excerpt because this is a protected post.]]></description>
+										<content:encoded><![CDATA[<form action="https://dailyexample.test/wp-login.php?action=postpass" class="post-password-form" method="post">
+<p>This content is password protected. To view it please enter your password below:</p>
+<p><label for="pwbox-98">Password: <input name="post_password" id="pwbox-98" type="password" size="20" /></label> <input type="submit" name="Submit" value="Enter" /></p>
+</form>
+]]></content:encoded>
+		</item>
+		<item>
+		<title>Weekend road closures</title>
+		<link>https://dailyexample.test/2024/03/03/weekend-road-closures/</link>
+		<dc:creator><![CDATA[]]></dc:creator>
+		<pubDate>Sun, 03 Mar 2024 18:00:00 -0500</pubDate>
+				<category><![CDATA[Traffic]]></category>
+		<guid isPermaLink="false">https://dailyexample.test/?p=97</guid>
+
+					<description><![CDATA[Crews will close two lanes of Route 9 between Elm and Oak streets from Friday night through Monday morning [&#8230;]]]></description>
+		</item>
+	</channel>
+</rss>

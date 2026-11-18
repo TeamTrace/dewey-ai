@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns="http://purl.org/rss/1.0/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:admin="http://webns.net/mvcb/">
+  <channel rdf:about="https://rdf.example.jp/index.rdf">
+    <title>Example Shimbun (English)</title>
+    <link>https://rdf.example.jp/</link>
+    <description>English edition</description>
+    <dc:language>en</dc:language>
+    <admin:generatorAgent rdf:resource="https://example.jp/cms/?v=2.0"/>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://rdf.example.jp/en/2024/01/15/harbor.html"/>
+        <rdf:li rdf:resource="https://rdf.example.jp/en/2024/01/14/rail.html"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://rdf.example.jp/en/2024/01/15/harbor.html">
+    <title>Harbor cleanup &amp; what comes next</title>
+    <link>https://rdf.example.jp/en/2024/01/15/harbor.html</link>
+    <description>Volunteers removed two tons of debris.</description>
+    <content:encoded><![CDATA[<p>Volunteers removed two tons of debris from the harbor on Sunday.</p><p>The city will add bins.</p>]]></content:encoded>
+    <dc:creator>Aiko Tanaka</dc:creator>
+    <dc:date>2024-01-15T10:00:00+09:00</dc:date>
+  </item>
+  <item rdf:about="https://rdf.example.jp/en/2024/01/14/rail.html">
+    <title>Rail line delayed</title>
+    <link>https://rdf.example.jp/en/2024/01/14/rail.html</link>
+    <description>The new rail line will open in 2026, a year late.</description>
+    <dc:date>2024-01-14</dc:date>
+  </item>
+</rdf:RDF>

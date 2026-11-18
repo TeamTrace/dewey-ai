@@ -221,8 +221,9 @@ def ask_stack(cur: dict) -> str:
     return choose(
         "Dewey can run on three stacks:",
         [
-            ("anthropic", "Claude writes the answers; your archive lives in Postgres. "
-                          "Needs an Anthropic account (paid API)."),
+            ("anthropic", "Claude writes the answers; your archive lives in Postgres. Needs an "
+                          "Anthropic account (paid API). Search models can be hosted (Voyage AI) "
+                          "or open source on this machine - you choose next."),
             ("open", "Everything open source on hardware you control: a local chat model "
                      "(via Ollama), local search models, Postgres. No accounts or API keys."),
             ("azure", "The original setup: Azure OpenAI + Azure AI Search + Blob Storage. "
@@ -268,6 +269,9 @@ def ask_anthropic(cur: dict, interactive: bool) -> dict:
 
 def ask_retrieval(stack: str, cur: dict) -> dict:
     heading("Search models: embeddings and reranking")
+    say("These turn your articles into searchable vectors and re-order the results. They're")
+    say("separate from the chat model: you can mix them, e.g. Claude for answers with")
+    say("open-source search models, which needs no Voyage account.")
     default_embed = "voyage" if stack == "anthropic" else "local"
     embed = choose(
         "Where should embeddings (the vectors that power semantic search) be computed?",

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:fh="http://purl.org/syndication/history/1.0">
+  <title>Example Newsroom archive: 2023</title>
+  <id>tag:atom.example.org,2024:feed</id>
+  <updated>2024-01-01T00:00:00Z</updated>
+  <fh:archive/>
+  <link rel="current" href="../atom.xml"/>
+  <link rel="next-archive" href="../atom.xml"/>
+  <link rel="prev-archive" href="https://elsewhere.invalid/archive/2022.xml"/>
+
+  <entry>
+    <title>Year in review: 2023</title>
+    <link rel="alternate" href="https://atom.example.org/news/2023/12/year-in-review"/>
+    <id>tag:atom.example.org,2023:story-4000</id>
+    <published>2023-12-31T23:59:59+00:00</published>
+    <updated>2023-12-31T23:59:59+00:00</updated>
+    <author><name>Priya Natarajan</name></author>
+    <content type="text">Plain text story. Use &lt;angle brackets&gt; literally &amp; keep this.</content>
+  </entry>
+</feed>

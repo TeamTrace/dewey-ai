@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	>
+<channel>
+	<title>Comments for The Daily Example</title>
+	<atom:link href="https://dailyexample.test/comments/feed/" rel="self" type="application/rss+xml" />
+	<link>https://dailyexample.test</link>
+	<description>News from Example County</description>
+	<generator>https://wordpress.org/?v=6.4.3</generator>
+	<item>
+		<title>Comment on Council&#8217;s budget vote by Pat</title>
+		<link>https://dailyexample.test/2024/03/05/council-budget-vote/#comment-12</link>
+		<dc:creator><![CDATA[Pat]]></dc:creator>
+		<pubDate>Tue, 05 Mar 2024 16:00:00 +0000</pubDate>
+		<guid isPermaLink="false">https://dailyexample.test/?p=101#comment-12</guid>
+		<description><![CDATA[Great reporting.]]></description>
+		<content:encoded><![CDATA[<p>Great reporting.</p>]]></content:encoded>
+	</item>
+</channel>
+</rss>

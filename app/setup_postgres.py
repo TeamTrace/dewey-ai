@@ -43,7 +43,10 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
         file_documents = data if isinstance(data, list) else [data]
         valid = 0
         for i, doc in enumerate(file_documents):
-            missing = [f for f in REQUIRED_FIELDS if not doc.get(f)]
+            # `authors` may be an empty list (no byline in the source); it must still be a list.
+            missing = [f for f in REQUIRED_FIELDS if f != "authors" and not doc.get(f)]
+            if not isinstance(doc.get("authors"), list):
+                missing.append("authors")
             if missing:
                 print(f"⚠️  Skipping document {i} in {path.name}: missing required fields: {', '.join(missing)}")
                 continue
