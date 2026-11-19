@@ -1328,11 +1328,49 @@ def get_archive(dry_run: bool = False) -> None:
         return
 
 
+def anthropic_credential_present(values: dict) -> bool:
+    """True when Dewey will find a Claude credential, whether or not it is in .env.
+
+    An `ant auth login` profile and Workload Identity Federation both work without
+    ANTHROPIC_API_KEY, so demanding the key would tell the user Dewey can't start
+    when it can. app/providers/__init__.py holds the canonical version
+    (anthropic_credential_source); this installer is standard library only and runs
+    before the dependencies exist, so it can't import it.
+    tests/install/test_credential_agreement.py keeps the two in step.
+    """
+    if values.get("ANTHROPIC_API_KEY", "").strip() or os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip():
+        return True
+    if (os.getenv("ANTHROPIC_FEDERATION_RULE_ID", "").strip()
+            and os.getenv("ANTHROPIC_ORGANIZATION_ID", "").strip()
+            and (os.getenv("ANTHROPIC_IDENTITY_TOKEN", "").strip()
+                 or os.getenv("ANTHROPIC_IDENTITY_TOKEN_FILE", "").strip())):
+        return True
+    config_dir = os.getenv("ANTHROPIC_CONFIG_DIR", "").strip()
+    if not config_dir:
+        config_dir = (os.path.join(os.getenv("APPDATA", ""), "Anthropic") if os.name == "nt"
+                      else os.path.expanduser("~/.config/anthropic"))
+
+    def profile_exists(name: str) -> bool:
+        return bool(name) and os.path.isfile(os.path.join(config_dir, "configs", f"{name}.json"))
+
+    named = os.getenv("ANTHROPIC_PROFILE", "").strip()
+    if named:
+        return profile_exists(named)  # a named profile that is missing is an error, not a fall-through
+    try:
+        with open(os.path.join(config_dir, "active_config"), encoding="utf-8") as fh:
+            active = fh.read().strip()
+    except OSError:
+        active = ""
+    return profile_exists(active) or profile_exists("default")
+
+
 def missing_required(values: dict) -> list:
     stack = values["DEWEY_STACK"]
     need = []
     if stack == "anthropic":
-        need += ["ANTHROPIC_API_KEY", "DATABASE_URL"]
+        need.append("DATABASE_URL")
+        if not anthropic_credential_present(values):
+            need.append("ANTHROPIC_API_KEY")
     if stack == "open":
         need += ["OPEN_LLM_MODEL", "DATABASE_URL"]
     if stack in ("anthropic", "open") and "voyage" in (values.get("EMBEDDING_PROVIDER"), values.get("RERANK_PROVIDER")):
