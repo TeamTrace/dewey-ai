@@ -87,20 +87,74 @@ KEPT_HEADER = "# Kept from your previous .env"
 
 # ---------------------------------------------------------------- terminal UI
 
+# ------------------------------------------------------------------- styling
+
+# The Gun Violence Data Hub palette, from tokens/colors.css in the Data Team's
+# design system, with the nearest xterm-256 index as a fallback. Only the
+# mid-tones are used: a terminal brings its own background, which may be light or
+# dark, so --white (warm paper) and --black (blue-black ink) are left out and body
+# text keeps the reader's own foreground colour.
+_PALETTE = {
+    "brand": ((0x67, 0x8D, 0xEF), 69),   # --blue, the signature periwinkle: links, accents
+    "deep": ((0x49, 0x64, 0xAA), 61),    # --blue-700, for structure
+    "gold": ((0xF9, 0xD1, 0x33), 220),   # --gold, whose role is selection highlight
+}
+
+
+def _colour_depth() -> int:
+    """24 for truecolour, 8 for the 256-colour palette, 0 for no colour."""
+    if os.getenv("NO_COLOR") is not None:  # no-color.org: any value, including empty
+        return 0
+    truecolour = os.getenv("COLORTERM", "").lower() in ("truecolor", "24bit")
+    if os.getenv("FORCE_COLOR"):
+        return 24 if truecolour else 8
+    if not sys.stdout.isatty() or os.getenv("TERM", "") in ("", "dumb"):
+        return 0
+    if os.name == "nt" and not (os.getenv("WT_SESSION") or os.getenv("ANSICON")):
+        return 0
+    return 24 if truecolour else 8
+
+
+_DEPTH = _colour_depth()
+_STYLED = _DEPTH > 0
+
+
+def _fg(name: str) -> str:
+    rgb, index = _PALETTE[name]
+    return "\033[38;2;%d;%d;%dm" % rgb if _DEPTH == 24 else f"\033[38;5;{index}m"
+
+
+RESET, BOLD, DIM, UNDERLINE = "\033[0m", "\033[1m", "\033[2m", "\033[4m"
+BRAND, DEEP, GOLD = (_fg("brand"), _fg("deep"), _fg("gold")) if _STYLED else ("", "", "")
+
+
+def paint(text: str, *codes: str) -> str:
+    """Wrap text in SGR codes as a single unit.
+
+    The text itself stays contiguous, which the wizard's own tests rely on: they
+    drive install.py through a pty and match on prompt substrings, so a code
+    inserted mid-phrase would break them.
+    """
+    if not _STYLED or not codes:
+        return text
+    return "".join(codes) + text + RESET
+
+
 def say(text: str = "") -> None:
     print(text)
 
 
 def heading(text: str) -> None:
     say()
-    say(f"── {text} " + "─" * max(0, 60 - len(text)))
+    say(paint("──", DEEP) + " " + paint(text, BRAND, BOLD) + " "
+        + paint("─" * max(0, 60 - len(text)), DEEP, DIM))
 
 
 def ask(prompt: str, default: str = "", required: bool = False) -> str:
-    suffix = f" [{default}]" if default else ""
+    suffix = paint(f" [{default}]", DIM) if default else ""
     while True:
         try:
-            value = input(f"{prompt}{suffix}: ").strip()
+            value = input(f"{prompt}{suffix}" + paint(":", BRAND) + " ").strip()
         except EOFError:
             value = ""
         value = value or default
@@ -113,7 +167,7 @@ def ask_secret(prompt: str, existing: str = "", kept: str = "the saved value") -
     """Hidden input. Enter keeps an existing value; '-' clears it."""
     hint = f" [Enter keeps {kept}, '-' clears it]" if existing else " [Enter to skip for now]"
     try:
-        value = getpass.getpass(f"{prompt}{hint}: ").strip()
+        value = getpass.getpass(f"{prompt}" + paint(hint, DIM) + paint(":", BRAND) + " ").strip()
     except EOFError:
         value = ""
     if value == "-":
@@ -124,7 +178,7 @@ def ask_secret(prompt: str, existing: str = "", kept: str = "the saved value") -
 def ask_yes(prompt: str, default: bool = True) -> bool:
     d = "Y/n" if default else "y/N"
     while True:
-        value = ask(f"{prompt} ({d})").lower()
+        value = ask(f"{prompt} " + paint(f"({d})", DIM)).lower()
         if not value:
             return default
         if value in ("y", "yes"):
@@ -137,8 +191,8 @@ def choose(prompt: str, options, default: str, mark: str = "current") -> str:
     """options: list of (value, description)."""
     say(prompt)
     for i, (value, desc) in enumerate(options, 1):
-        marker = f" ({mark})" if value == default else ""
-        say(f"  {i}. {value}{marker}: {desc}")
+        marker = paint(f" ({mark})", GOLD) if value == default else ""
+        say("  " + paint(f"{i}.", BRAND, BOLD) + f" {value}{marker}: {desc}")
     values = [v for v, _ in options]
     while True:
         raw = ask("Choose a number or name", default)
@@ -150,7 +204,7 @@ def choose(prompt: str, options, default: str, mark: str = "current") -> str:
 
 
 def offer_link(label: str, url: str, interactive: bool = True) -> None:
-    say(f"  {label}: {url}")
+    say(f"  {label}: " + paint(url, BRAND, UNDERLINE))
     if interactive and ask_yes("  Open it in your browser now?", default=False):
         try:
             webbrowser.open(url)
@@ -1087,7 +1141,9 @@ def main() -> int:
     args = parser.parse_args()
     interactive = not args.no_browser
 
-    say("Dewey setup")
+    say()
+    say("  " + paint("DEWEY", BRAND, BOLD) + paint("  ·  newsroom archive setup", DIM))
+    say("  " + paint("─" * 44, DEEP, DIM))
     say("This walks you through choosing a stack, getting any accounts and keys it needs,")
     say("and writing your .env file. Secrets are typed hidden and stored only in .env.")
     if sys.version_info < MIN_PYTHON:
