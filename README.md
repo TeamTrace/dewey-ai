@@ -67,7 +67,7 @@ Anthropic does not offer an embedding model; its documentation points to Voyage 
    This creates the tables and indexes, splits each article into ~380-word chunks with ~70-word overlap (an approximation of the Azure path's 512-token/96-token split), embeds them with Voyage, and stores them. Re-running it updates articles in place.
 4. Launch Dewey as usual: `python app/main.py`.
 
-Model and cost notes: both Claude steps default to `claude-opus-5`. The search-planning step runs at `low` effort and the answer at `medium`; override them with `ANTHROPIC_MODEL`, `ANTHROPIC_METADATA_EFFORT` and `ANTHROPIC_ANSWER_EFFORT`. Requests opt into Anthropic's server-side refusal fallback: if a safety classifier declines a request, the API retries it on a fallback model in the same call. If the whole chain declines, Dewey says so in the answer instead of failing silently.
+Model and cost notes: both Claude steps default to `claude-opus-5-5`. The search-planning step runs at `low` effort and the answer at `medium`; override them with `ANTHROPIC_MODEL`, `ANTHROPIC_METADATA_EFFORT` and `ANTHROPIC_ANSWER_EFFORT`. Requests opt into Anthropic's server-side refusal fallback: if a safety classifier declines a request, the API retries it on a fallback model in the same call. If the whole chain declines, Dewey says so in the answer instead of failing silently.
 
 ### What the hosted providers receive
 

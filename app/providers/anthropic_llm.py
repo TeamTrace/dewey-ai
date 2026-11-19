@@ -20,7 +20,7 @@ from models import NewsroomConfig, SearchMetadata
 from tools import load_answer_prompt, load_search_prompt
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 
 REFUSAL_NOTICE = (
     "\n\n_Dewey's language model declined to answer this request. "
