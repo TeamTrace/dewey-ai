@@ -415,9 +415,9 @@ couldn't confirm that a custom connector can use Dewey's HTTP server (*unverifie
      `authors: ["Jane Doe"]`. Most clients let you expand a tool call to see its arguments.
    - The URLs in the answer are ones the tool returned, and they open your articles with those dates
      and that byline.
-   - The server log shows the filters it applied. On the Postgres stacks it prints a line ending in
-     something like `{'start_date': '2023-01-01', 'end_date': '2023-06-30', 'authors': ['Jane Doe']}`
-     (`docker compose logs dewey`; in stdio mode the log goes to the client, see [Security](#security)).
+   - The tool's results match those filters: every source's `publish_date` is in the range and its
+     `authors` include that byline. (The server doesn't log the filters it applies, so check them in
+     the client's tool call and in the results.)
 4. **If the filters are missing** (no `authors`, no dates), the client's model didn't use them. Ask
    again more explicitly, give the model an instruction to always pass dates and exact bylines, or try
    a model with better tool calling. If `authors` is set but nothing comes back, check the spelling and
@@ -439,8 +439,8 @@ couldn't confirm that a custom connector can use Dewey's HTTP server (*unverifie
   Compose never publishes it).
 - **Rotate the token** when someone leaves, a laptop is lost, or a config file is shared by mistake:
   generate a new one, update `.env`, restart the server (`docker compose up -d`), update each client.
-- **Logs.** The server's diagnostics (including the search filters it applies, and error tracebacks)
-  go to stderr. In stdio mode the client that started the server receives that output; whether and
+- **Logs.** The server's diagnostics (warnings, which can quote a date or search plan the model wrote
+  from a question, and error tracebacks) go to stderr. In stdio mode the client that started the server receives that output; whether and
   where it keeps it differs per client (*unverified; check the client's docs*).
 - **Errors.** When a search fails on the server (the database is down, a model service refuses a key,
   `DATABASE_URL` is mistyped), clients get only "a problem on the Dewey server" and a reference; the

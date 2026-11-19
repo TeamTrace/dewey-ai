@@ -481,8 +481,9 @@ and refusals: [MCP.md](MCP.md#before-you-start-http).
       untrusted input ([MCP.md](MCP.md#security)).
 - [ ] **Backups** with `pg_dump` on a schedule, stored off the server, and a restore tested at least
       once. Keep `data/*.json` too.
-- [ ] **Logs are newsroom-confidential:** Dewey prints search filters (dates, author names) to its error
-      log.
+- [ ] **Logs are newsroom-confidential:** Dewey no longer logs each search's filters, but its error log
+      can still hold text derived from a question: a date the model wrote that couldn't be parsed, the
+      `open` stack's search plan when it fails validation, and error tracebacks.
 - [ ] **Updates:** `requirements.txt` pins every Python package, so rebuilding the image picks up
       security fixes in the base image only. Library fixes arrive as pull requests from Dependabot
       (`.github/dependabot.yml`; turn on "Dependabot security updates" in your fork's settings): merge
