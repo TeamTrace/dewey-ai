@@ -214,7 +214,8 @@ class WizardImportTests(unittest.TestCase):
         ("Model name", ""),
         ("Choose a number or name", "local"),    # embeddings
         ("Choose a number or name", "none"),     # reranking
-        ("Database URL", ""),                    # left out: no checks, no indexing, nothing reaches a database
+        # "later": no database, so no checks, no indexing, nothing reaches Postgres
+        (r"Do you have a Postgres database[\s\S]*?Choose a number or name", "later"),
         ("Newsroom name", ""),
         ("Earliest article date", ""),
         ("Region", "none"),

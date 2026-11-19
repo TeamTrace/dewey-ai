@@ -166,3 +166,34 @@ class ModelServerCheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnclaimedValueTests(unittest.TestCase):
+    """A value the wizard produces that no SECTIONS entry claims must still reach .env.
+
+    POSTGRES_PASSWORD is the case: it is deliberately unmanaged, because the docs tell
+    Compose users to keep it in .env themselves and a managed key is dropped on a run
+    that doesn't set one. The Docker step generates it, so it has to be written anyway.
+    """
+
+    DB_URL = "postgresql://dewey:pw@127.0.0.1:5432/dewey"
+
+    def test_a_generated_password_is_written_and_masked_in_the_summary(self):
+        content = install.render_env(
+            {"DEWEY_STACK": "anthropic", "DATABASE_URL": self.DB_URL,
+             "POSTGRES_PASSWORD": "abc123generated"}, {})
+        self.assertIn("POSTGRES_PASSWORD='abc123generated'", content)
+        self.assertIn("POSTGRES_PASSWORD='********'", install.redact(content))
+
+    def test_an_existing_password_survives_a_run_that_does_not_set_one(self):
+        content = install.render_env({"DEWEY_STACK": "anthropic"}, {"POSTGRES_PASSWORD": "kept-value"})
+        self.assertIn("POSTGRES_PASSWORD='kept-value'", content)
+
+    def test_a_produced_value_replaces_the_previous_one_exactly_once(self):
+        content = install.render_env({"POSTGRES_PASSWORD": "new"}, {"POSTGRES_PASSWORD": "old"})
+        self.assertEqual(content.count("POSTGRES_PASSWORD="), 1, content)
+        self.assertIn("POSTGRES_PASSWORD='new'", content)
+
+    def test_managed_keys_still_go_in_their_own_section(self):
+        content = install.render_env({"DEWEY_STACK": "anthropic", "DATABASE_URL": self.DB_URL}, {})
+        self.assertNotIn(install.EXTRA_HEADER, content)
