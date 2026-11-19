@@ -45,6 +45,57 @@ def _require(*names: str) -> None:
         )
 
 
+def _profile_config_path() -> str:
+    """Path to the config file for the profile the SDK would load, or "" if there is none.
+
+    Mirrors the SDK's lookup: $ANTHROPIC_CONFIG_DIR, else ~/.config/anthropic (or
+    %APPDATA%\\Anthropic on Windows); then $ANTHROPIC_PROFILE, else the name in
+    active_config, else "default".
+    """
+    config_dir = os.getenv("ANTHROPIC_CONFIG_DIR", "").strip()
+    if not config_dir:
+        if os.name == "nt":
+            config_dir = os.path.join(os.getenv("APPDATA", ""), "Anthropic")
+        else:
+            config_dir = os.path.expanduser("~/.config/anthropic")
+
+    def config_for(name: str) -> str:
+        path = os.path.join(config_dir, "configs", f"{name}.json")
+        return path if name and os.path.isfile(path) else ""
+
+    named = os.getenv("ANTHROPIC_PROFILE", "").strip()
+    if named:
+        # A named profile that doesn't exist is an error for the SDK, not a fall-through.
+        return config_for(named)
+    try:
+        with open(os.path.join(config_dir, "active_config"), encoding="utf-8") as fh:
+            active = fh.read().strip()
+    except OSError:
+        active = ""
+    return config_for(active) or config_for("default")
+
+
+def anthropic_credential_source() -> str:
+    """Name of the Claude credential the SDK will use, or "" when it would find none.
+
+    anthropic_llm.py constructs Anthropic() with no arguments, so the SDK resolves the
+    credential itself. Dewey only checks that one exists, in the SDK's own precedence
+    order, so that a profile from `ant auth login` or a Workload Identity Federation
+    setup isn't rejected as a missing API key.
+    """
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        if os.getenv(var, "").strip():
+            return var
+    if (os.getenv("ANTHROPIC_FEDERATION_RULE_ID", "").strip()
+            and os.getenv("ANTHROPIC_ORGANIZATION_ID", "").strip()
+            and (os.getenv("ANTHROPIC_IDENTITY_TOKEN", "").strip()
+                 or os.getenv("ANTHROPIC_IDENTITY_TOKEN_FILE", "").strip())):
+        return "workload identity federation"
+    if _profile_config_path():
+        return "profile"
+    return ""
+
+
 def current_stack() -> str:
     stack = os.getenv("DEWEY_STACK", "azure").strip().lower()
     if stack not in STACKS:
@@ -87,7 +138,27 @@ def build_stack(newsroom: NewsroomConfig) -> Tuple[LLMProvider, Retriever]:
     if stack == "anthropic":
         from .anthropic_llm import DEFAULT_MODEL, AnthropicLLM
 
-        _require("ANTHROPIC_API_KEY", "DATABASE_URL")
+        blanked = [v for v in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+                   if v in os.environ and not os.environ[v].strip()]
+        if blanked:
+            raise StackConfigError(
+                f"{', '.join(blanked)} is set but empty. An empty value still takes precedence over "
+                "a profile and over Workload Identity Federation, so the request would be sent with "
+                "no credential. Remove the line (don't leave it blank) or give it a real value."
+            )
+        if not anthropic_credential_source():
+            named = os.getenv("ANTHROPIC_PROFILE", "").strip()
+            raise StackConfigError(
+                "DEWEY_STACK=anthropic needs a Claude credential. Set ANTHROPIC_API_KEY, or run "
+                "`ant auth login` to store a profile, or set ANTHROPIC_FEDERATION_RULE_ID, "
+                "ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_IDENTITY_TOKEN (or "
+                "ANTHROPIC_IDENTITY_TOKEN_FILE) for Workload Identity Federation. Leave "
+                "ANTHROPIC_API_KEY unset rather than empty: an empty value still takes "
+                "precedence over a profile and over federation."
+                + (f" ANTHROPIC_PROFILE={named!r} is set, but that profile has no config file; "
+                   "the SDK does not try another source when it is set." if named else "")
+            )
+        _require("DATABASE_URL")
         retriever = build_pgvector_store()
         llm = AnthropicLLM(
             newsroom,
