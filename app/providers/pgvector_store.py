@@ -256,7 +256,6 @@ class PgVectorStore:
         ).embeddings[0]
 
         where, params = build_where(metadata)
-        print(where, params)
         params.update(qvec=np.asarray(qvec, dtype=np.float32), qtext=question,
                       k=CANDIDATES_PER_METHOD, rrf_k=RRF_K)
 
