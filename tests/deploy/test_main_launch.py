@@ -8,6 +8,7 @@ import http.client
 import io
 import json
 import os
+import tempfile
 import socket
 import unittest
 import urllib.error
@@ -265,7 +266,11 @@ class MainFunctionTest(unittest.TestCase):
         build_ui.assert_not_called()
 
     def test_stack_config_error_exits_1_with_message(self):
-        code, out, err, build_ui = self.run_main({"DEWEY_STACK": "anthropic"})
+        # Point at an empty config directory: a profile from `ant auth login` is itself a
+        # valid credential, so without this the result depends on the developer's machine.
+        config_dir = self.enterContext(tempfile.TemporaryDirectory())
+        code, out, err, build_ui = self.run_main({"DEWEY_STACK": "anthropic",
+                                                  "ANTHROPIC_CONFIG_DIR": config_dir})
         self.assertEqual(code, 1)
         self.assertIn("ANTHROPIC_API_KEY", err)
         self.assertIn("Listening on 127.0.0.1", out)
