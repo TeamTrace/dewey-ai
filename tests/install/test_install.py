@@ -349,8 +349,8 @@ class WizardImportTests(unittest.TestCase):
         sites = []
         out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [
             (self.WHERE, "ghost"),
-            ("API URL", self.start_fake(test_ghost.FakeGhost, sites)),
-            ("Content API key", test_ghost.KEY),
+            (r"API URL \(or", self.start_fake(test_ghost.FakeGhost, sites)),
+            (r"Content API key \(hidden\)", test_ghost.KEY),
             ("Try a small import first", "y"),
             (self.WHAT_NEXT, "full"),
             ("Remove the sample file", "y"),
@@ -399,8 +399,8 @@ class WizardImportTests(unittest.TestCase):
     def test_dry_run_with_a_key_never_shows_it(self):
         out, status = self.wizard(self.OPEN_STACK + [
             (self.WHERE, "ghost"),
-            ("API URL", "https://example.ghost.io"),
-            ("Content API key", GHOST_KEY),
+            (r"API URL \(or", "https://example.ghost.io"),
+            (r"Content API key \(hidden\)", GHOST_KEY),
         ], "--dry-run")
         self.assertEqual(status, 0, out)
         self.assertNotIn(GHOST_KEY, out)
