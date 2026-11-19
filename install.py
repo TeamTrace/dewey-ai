@@ -32,6 +32,7 @@ import shlex
 import secrets
 import shutil
 import subprocess
+import textwrap
 import sys
 import urllib.error
 import urllib.parse
@@ -675,6 +676,152 @@ def check_services(values: dict) -> None:
         say(f"  {name}: {status}")
 
 
+# ------------------------------------------------- checks on what was imported
+
+@dataclass
+class ImportFinding:
+    """Something structurally wrong with imported articles. `stop` means don't
+    import the rest of the archive before looking at it."""
+    stop: bool
+    saw: str
+    fix: str
+
+
+def load_imported(paths) -> List[dict]:
+    """The articles in the files an importer just wrote."""
+    docs = []
+    for path in sorted(paths):
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, list):
+            docs += [d for d in data if isinstance(d, dict)]
+    return docs
+
+
+def review_import(docs: List[dict], plan: Optional["ImportPlan"] = None) -> List[ImportFinding]:
+    """What looks wrong about freshly imported articles.
+
+    The importer reports what it skipped. This looks at what it kept, because a
+    field mapped to the wrong thing imports perfectly cleanly: a byline that is
+    the same on every article, or a date that never varies, only shows up later
+    as a filter that returns nothing or credits the wrong reporter.
+    """
+    found: List[ImportFinding] = []
+    total = len(docs)
+    if not total:
+        return found
+
+    bylined = [d for d in docs if d.get("authors")]
+    names = {a for d in docs for a in (d.get("authors") or []) if isinstance(a, str)}
+
+    if not bylined:
+        found.append(ImportFinding(
+            False,
+            f"None of the {total} articles has a byline.",
+            "Dewey never guesses a name, so author filters will match nothing. If the site "
+            "runs Co-Authors Plus, check that it exposes the coauthors/v1 API; otherwise "
+            "pass --byline-field with the field that holds the byline, or import a "
+            "WordPress export file, which carries bylines without the REST API.",
+        ))
+    elif total > 1 and len(names) == 1 and len(bylined) == total:
+        found.append(ImportFinding(
+            True,
+            f"All {total} articles are credited to {sorted(names)[0]!r}.",
+            "One name on everything means the byline field isn't computed per article. "
+            "Yoast's yoast_head_json behaves this way in a list response, so "
+            "--byline-field yoast_head_json.author reads the same name every time. Drop "
+            "that option, point it at a field that varies per article, or import a "
+            "WordPress export file instead.",
+        ))
+
+    composite = sorted(a for a in names if re.search(r"\s+and\s+|,", a))
+    if composite:
+        found.append(ImportFinding(
+            False,
+            f"{len(composite)} byline(s) hold more than one name in one string, "
+            f"e.g. {composite[0]!r}.",
+            "An author filter matches a whole byline, so neither writer is findable under "
+            "their own name. Split them into separate names before indexing.",
+        ))
+
+    ids = [d.get("id") for d in docs if d.get("id")]
+    repeated = sorted({i for i in ids if ids.count(i) > 1})
+    if repeated:
+        found.append(ImportFinding(
+            True,
+            f"{len(repeated)} article id(s) appear more than once, e.g. {repeated[0]!r}.",
+            "Indexing keeps one article per id, so the others are lost. If you are merging "
+            "two sources, import them separately with --prefix.",
+        ))
+
+    unlinked = [d for d in docs if not str(d.get("url") or "").startswith(("http://", "https://"))]
+    if unlinked:
+        found.append(ImportFinding(
+            False,
+            f"{len(unlinked)} of {total} articles have no usable url.",
+            "Answers cite the url, so those articles can be found but not cited. Check that "
+            "the importer is reading the public link and not an internal path.",
+        ))
+
+    dates = {str(d.get("publish_date") or "")[:10] for d in docs}
+    if total > 1 and len(dates) == 1:
+        found.append(ImportFinding(
+            False,
+            f"Every article has the publish date {sorted(dates)[0]!r}.",
+            "Date filters can't narrow anything. Check that the field is the publish date "
+            "and not the import or last-modified date.",
+        ))
+
+    # A byline can be present, varied and still wrong, which no check on the data
+    # can see. The WordPress post author is whoever published the story in the CMS,
+    # which on some sites is an editor rather than the reporter -- so say where the
+    # names came from and ask for a spot-check.
+    if plan is not None and plan.source == "wordpress-api" and bylined \
+            and not any(a.startswith("--byline-field") for a in plan.args):
+        found.append(ImportFinding(
+            False,
+            "Bylines came from each post's WordPress author field.",
+            "On some sites that field holds whoever published the story rather than who "
+            "wrote it, and a wrong name imports as cleanly as a right one. Open two or "
+            "three of the articles above on the live site and check the bylines match. "
+            "If they don't, the real byline is usually in a plugin's own field: pass "
+            "--byline-field with it, or import a WordPress export file.",
+        ))
+
+    lengths = sorted(len(str(d.get("content") or "")) for d in docs)
+    median = lengths[len(lengths) // 2]
+    if median < 400:
+        found.append(ImportFinding(
+            True,
+            f"The median article is {median} characters long.",
+            "That is the length of an excerpt, not an article, so retrieval has almost "
+            "nothing to match on. Check that the content field is the full body text.",
+        ))
+
+    return found
+
+
+def report_import_review(docs: List[dict], plan: Optional["ImportPlan"] = None) -> bool:
+    """Print what the review found. False when something needs looking at first."""
+    if not docs:
+        return True
+    findings = review_import(docs, plan)
+    if not findings:
+        say("  " + paint("Checked", BRAND) + f" {len(docs)} article(s): bylines, ids, links, "
+            "dates and article length all look usable.")
+        return True
+    say()
+    say(paint(f"Checked {len(docs)} imported article(s) and found:", BRAND, BOLD))
+    for finding in findings:
+        mark = paint("needs a look", GOLD) if finding.stop else paint("worth knowing", DIM)
+        say(f"  [{mark}] {finding.saw}")
+        for line in textwrap.wrap(finding.fix, 74):
+            say(f"      {line}")
+    return not any(f.stop for f in findings)
+
+
 def index_archive(values: dict) -> None:
     heading("Index your archive")
     data = sorted((ROOT / "data").glob("*.json"))
@@ -1146,16 +1293,18 @@ def get_archive(dry_run: bool = False) -> None:
             after = json_snapshot(data_dir)
             trial_files |= {data_dir / n for n, m in after.items() if before.get(n) != m and "-sample-" in n}
             say()
+            review_ok = True
             if trial_ok:
                 say("Check the report above (how many articles, their dates, missing bylines, what was")
                 say("skipped and why), and open the -sample file in data/ to check a few stories.")
+                review_ok = report_import_review(load_imported(trial_files), plan)
             else:
                 say("The trial stopped; the message above says what to change.")
             next_step = choose("What next?", [
                 ("full", "Import everything with these settings"),
                 ("change", "Change the answers (or add importer options) and try again"),
                 ("stop", "Stop here; the command to import later is shown next"),
-            ], default="full" if trial_ok else "change", mark="default")
+            ], default="full" if trial_ok and review_ok else "change", mark="default")
         else:
             next_step = "full"
 
