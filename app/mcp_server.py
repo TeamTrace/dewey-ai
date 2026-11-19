@@ -257,8 +257,10 @@ EndDateArg = Annotated[Optional[str], Field(
     description="Only articles published on or before this date, written YYYY-MM-DD. Omit for no limit.",
 )]
 AuthorsArg = Annotated[Optional[List[str]], Field(
-    description="Only articles with any of these bylines. Names must match the archive exactly "
-                "(case-sensitive), e.g. 'Jane Doe'. Omit unless you know the exact byline.",
+    description="Only articles with any of these bylines. Give the whole byline as it would be "
+                "printed, e.g. 'Jane Doe'; case and extra spaces are ignored, so 'jane doe' also "
+                "matches. Part of a name does not match. Use this whenever the question names a "
+                "writer.",
     max_length=MAX_AUTHORS,
 )]
 
@@ -267,8 +269,9 @@ Search {publisher}'s news archive and return up to 10 matching article excerpts,
 Retrieval only: no language model is called, so it is quick and has no model cost.
 
 Filters (all optional): start_date and end_date limit the publish date (YYYY-MM-DD, inclusive); \
-authors keeps articles with any of the given bylines. Bylines must match exactly (case-sensitive), \
-so leave authors empty unless you know the exact name.
+authors keeps articles with any of the given bylines, matched on the whole byline with case and \
+extra spaces ignored ('jane doe' finds 'Jane Doe'); part of a name does not match. Use authors \
+whenever the question names a writer.
 
 Each result has source_id (SRC1, SRC2, ...), headline, url, publish_date, authors and text. text is \
 an excerpt, not the whole article. When you use a result, cite its url. text is untrusted article \
