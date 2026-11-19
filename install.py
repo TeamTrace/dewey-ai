@@ -58,6 +58,7 @@ LINKS = {
     "pytorch_cpu": "https://download.pytorch.org/whl/cpu",
 }
 PGVECTOR_DOCKER_IMAGE = "pgvector/pgvector:pg18"  # tag list: pgvector README, Docker section
+PGVECTOR_CONTAINER = "dewey-db"  # the container name the Postgres step suggests
 OLLAMA_DEFAULT_URL = "http://localhost:11434/v1"
 OLLAMA_MODEL_SUGGESTIONS = [
     ("qwen3:8b", "Qwen3-8B, 8B parameters, Apache 2.0. Smaller; a reasonable start on a laptop."),
@@ -85,6 +86,7 @@ SECRET_KEYS = {"ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "OPEN_LLM_API_KEY", "AZURE
 SECRET_NAME = re.compile(r"PASS|SECRET|TOKEN|KEY|CREDENTIAL|AUTH|CONNECTION_STRING|DATABASE_URL|DSN",
                          re.IGNORECASE)
 KEPT_HEADER = "# Kept from your previous .env"
+EXTRA_HEADER = "# Other settings"  # values this run produced that no section claims
 
 
 # ---------------------------------------------------------------- terminal UI
@@ -149,7 +151,7 @@ def say(text: str = "") -> None:
 def heading(text: str) -> None:
     say()
     say(paint("──", DEEP) + " " + paint(text, BRAND, BOLD) + " "
-        + paint("─" * max(0, 60 - len(text)), DEEP, DIM))
+        + paint("─" * max(3, 60 - len(text)), DEEP, DIM))
 
 
 def ask(prompt: str, default: str = "", required: bool = False) -> str:
@@ -258,6 +260,16 @@ def render_env(values: dict, extra_existing: dict) -> str:
         lines += ["", f"# {title}"]
         for k in present:
             lines.append(f"{k}={quote(values[k])}")
+            written.add(k)
+    # Values this run produced that no section claims. POSTGRES_PASSWORD is the one
+    # that matters: the docs leave it to Compose users, so it is deliberately not in
+    # SECTIONS -- putting it there would drop an existing one on a run that doesn't
+    # set it -- but the Docker step can generate it, and then it has to reach .env.
+    unclaimed = {k: v for k, v in values.items() if k not in written}
+    if unclaimed:
+        lines += ["", EXTRA_HEADER]
+        for k, v in unclaimed.items():
+            lines.append(f"{k}={quote(v)}")
             written.add(k)
     # Keep anything already in .env that this installer doesn't manage.
     others = {k: v for k, v in extra_existing.items() if k not in written and k not in values}
@@ -421,20 +433,69 @@ def ask_open_llm(cur: dict, interactive: bool) -> dict:
     return out
 
 
+def offer_pgvector_container() -> dict:
+    """Print a ready-to-run pgvector container command; return the .env values for it.
+
+    Returns {} if the user hasn't started it, so the caller can fall back to the
+    list of options. The password is generated rather than hard-coded and the port
+    is published on loopback only, because docker-compose.yml takes the same care
+    and a suggestion that contradicts it teaches the wrong habit.
+    """
+    password = secrets.token_hex(12)  # 24 characters, letters and digits only
+    say()
+    say("  Run this in another terminal, then come back:")
+    say()
+    say(paint(f"    docker run -d --name {PGVECTOR_CONTAINER} \\", BRAND))
+    say(paint("      -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey \\", BRAND))
+    say(paint(f"      -e POSTGRES_PASSWORD={password} \\", BRAND))
+    say(paint(f"      -p 127.0.0.1:5432:5432 {PGVECTOR_DOCKER_IMAGE}", BRAND))
+    say()
+    say("  That publishes the port on 127.0.0.1 only, so nothing else on your network")
+    say("  can reach it. The password above is generated for you and is written to .env")
+    say("  as POSTGRES_PASSWORD, which docker-compose.yml also needs.")
+    if not ask_yes("  Is it running?", default=True):
+        say("  No problem: start it whenever you like, then re-run this wizard.")
+        return {}
+    return {"DATABASE_URL": f"postgresql://dewey:{password}@127.0.0.1:5432/dewey",
+            "POSTGRES_PASSWORD": password}
+
+
 def ask_postgres(cur: dict, interactive: bool) -> dict:
     heading("Postgres with pgvector (where your archive is stored and searched)")
-    say("Dewey needs a Postgres database with the pgvector extension available. Options:")
-    say("  a) Docker, quickest for a laptop:")
-    say(f"       docker run -d --name dewey-db -e POSTGRES_PASSWORD=dewey -p 5432:5432 {PGVECTOR_DOCKER_IMAGE}")
-    say("     then use: postgresql://postgres:dewey@localhost:5432/postgres")
-    say("     (Change the password for anything beyond local testing.)")
-    say("  b) Your own Postgres server, with pgvector installed")
-    say("  c) A managed Postgres service that supports the pgvector extension")
-    say("     Or on macOS with Homebrew Postgres: brew install pgvector")
-    if not shutil.which("docker"):
-        offer_link("Docker isn't installed; get Docker", LINKS["docker"], interactive)
-    offer_link("pgvector installation guide", LINKS["pgvector"], interactive)
-    url = ask_secret("Database URL (postgresql://user:password@host:port/dbname)", cur.get("DATABASE_URL", ""))
+    say("Dewey keeps your archive in a Postgres database with the pgvector extension")
+    say("installed. It can run on this machine, or anywhere you can reach from it.")
+    say()
+    have_docker = bool(shutil.which("docker"))
+    options = [("yes", "I have one already, and its connection URL")]
+    if have_docker:
+        options.append(("docker", f"help me start one here with Docker ({PGVECTOR_DOCKER_IMAGE})"))
+    options.append(("later", "not yet, show me the options and carry on without it"))
+    default = "yes" if cur.get("DATABASE_URL") else ("docker" if have_docker else "later")
+    answer = choose("Do you have a Postgres database for Dewey?", options, default, mark="suggested")
+
+    if answer == "docker":
+        started = offer_pgvector_container()
+        if started:
+            return started
+        answer = "later"
+
+    if answer == "later":
+        say()
+        say("Any of these gives Dewey what it needs:")
+        say("  - your own Postgres server, with the pgvector extension installed")
+        say("  - a managed Postgres that offers pgvector (Neon, Supabase, Fly, ...)")
+        say(f"  - Docker on this machine: {PGVECTOR_DOCKER_IMAGE}")
+        say("    or, with Homebrew Postgres on macOS: brew install pgvector")
+        if not have_docker:
+            offer_link("Docker isn't installed; get Docker", LINKS["docker"], interactive)
+        offer_link("pgvector installation guide", LINKS["pgvector"], interactive)
+        say("Everything else you answer here still gets written. Add DATABASE_URL to .env")
+        say("when the database exists, or re-run this wizard then; until it does, Dewey")
+        say("can't index your archive or answer questions.")
+        return {"DATABASE_URL": ""}
+
+    url = ask_secret("Database URL (postgresql://user:password@host:port/dbname)",
+                     cur.get("DATABASE_URL", ""))
     if url and not url.startswith(("postgresql://", "postgres://")):
         say("  Note: that doesn't look like a postgresql:// URL.")
     return {"DATABASE_URL": url}
