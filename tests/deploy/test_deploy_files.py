@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "app"))
 
 import fnmatch
+import json
 import os
 import re
 import shutil
@@ -316,6 +317,20 @@ class ComposeConfigTest(unittest.TestCase):
     def config(self, dotenv, *args):
         with tempfile.TemporaryDirectory() as tmp:
             (pathlib.Path(tmp) / ".env").write_text(dotenv)
+            # DOCKER_CONFIG is redirected to tmp so the developer's real config is never
+            # read, but that also hides the compose plugin when it lives outside docker's
+            # default search path: Homebrew installs it in /opt/homebrew/lib/docker/
+            # cli-plugins and registers it only through cliPluginsExtraDirs. Carry that
+            # setting over, or `docker compose` is not a command and -f reaches docker.
+            real_config = pathlib.Path(
+                os.environ.get("DOCKER_CONFIG") or pathlib.Path.home() / ".docker") / "config.json"
+            try:
+                extra_dirs = json.loads(real_config.read_text()).get("cliPluginsExtraDirs") or []
+            except (OSError, ValueError):
+                extra_dirs = []
+            if extra_dirs:
+                (pathlib.Path(tmp) / "config.json").write_text(
+                    json.dumps({"cliPluginsExtraDirs": extra_dirs}))
             env = {"PATH": os.environ.get("PATH", ""), "HOME": tmp, "DOCKER_CONFIG": tmp}
             return subprocess.run(
                 ["docker", "compose", "-f", str(ROOT / "docker-compose.yml"), "--project-directory", tmp,
