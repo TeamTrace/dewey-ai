@@ -75,14 +75,25 @@ class SearchPromptTest(unittest.TestCase):
 
 class AnswerPromptTest(unittest.TestCase):
 
-    def prompt(self):
-        return load_answer_prompt("Monday, November 19, 2026")
+    def prompt(self, publisher="The Trace"):
+        return load_answer_prompt("Monday, November 19, 2026", NewsroomConfig(publisher=publisher))
 
     def test_a_source_carries_its_publisher(self):
         self.assertIn("publisher", self.prompt())
 
+    def test_it_knows_whose_archive_this_is(self):
+        # Without this the prompt assumed the packaged default, and the attribution rule
+        # then reasoned correctly from a wrong premise: it called the newsroom's own
+        # reporting "outside reporting" because it believed it worked for someone else.
+        prompt = self.prompt()
+        self.assertIn("The Trace's newsroom", prompt)
+        self.assertIn("Sources published by The Trace are this", prompt)
+
     def test_it_must_not_present_other_work_as_the_newsroom_s_own(self):
-        self.assertIn("Never present another publisher's work as the newsroom's own", self.prompt())
+        self.assertIn("Never present another publisher's work as The Trace's.", self.prompt())
+
+    def test_it_still_works_without_a_newsroom(self):
+        self.assertIn(NewsroomConfig().publisher, load_answer_prompt("Monday, November 19, 2026"))
 
     def test_it_still_refuses_instructions_found_in_sources(self):
         # The injection defence has to survive edits to this prompt: clipped material

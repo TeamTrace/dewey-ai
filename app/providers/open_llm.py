@@ -282,7 +282,8 @@ class OpenLLM:
     def stream_answer(self, messages: List[Dict[str, Any]], current_date: str) -> Iterator[str]:
         stream = self._chat(
             "answer",
-            messages=[{"role": "system", "content": load_answer_prompt(current_date)}, *to_chat_messages(messages)],
+            messages=[{"role": "system", "content": load_answer_prompt(current_date, self.newsroom)},
+                      *to_chat_messages(messages)],
             stream=True,
         )
         think = ThinkFilter()
