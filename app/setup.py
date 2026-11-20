@@ -24,7 +24,7 @@ class SetupManager:
         self.env_file = Path(__file__).parent.parent / ".env"
         
         # Load environment variables
-        load_dotenv(self.env_file)
+        load_dotenv(self.env_file, interpolate=False)  # values are literal
         
     def validate_configuration(self) -> Dict[str, str]:
         """Validate and return configuration from environment variables."""

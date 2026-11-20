@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	>
+
+<channel>
+	<title>The Hidden Herald</title>
+	<atom:link href="https://herald.example.net/feed/?paged=2" rel="self" type="application/rss+xml" />
+	<link>https://herald.example.net</link>
+	<description>A WordPress site whose security plugin removes the generator tag</description>
+	<item>
+		<title>School levy passes narrowly</title>
+		<link>https://herald.example.net/2024/03/01/school-levy/</link>
+		<dc:creator><![CDATA[Rita Moreno]]></dc:creator>
+		<pubDate>Fri, 01 Mar 2024 23:40:00 +0000</pubDate>
+		<guid isPermaLink="false">https://herald.example.net/?p=301</guid>
+		<description><![CDATA[The levy passed by 212 votes.]]></description>
+		<content:encoded><![CDATA[<p>The levy passed by 212 votes.</p>]]></content:encoded>
+	</item>
+	</channel>
+</rss>

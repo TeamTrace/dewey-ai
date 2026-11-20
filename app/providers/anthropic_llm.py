@@ -100,7 +100,7 @@ class AnthropicLLM:
         with self.client.beta.messages.stream(
             model=self.model,
             max_tokens=16000,
-            system=load_answer_prompt(current_date),
+            system=load_answer_prompt(current_date, self.newsroom),
             messages=to_claude_messages(messages),
             output_config={"effort": self.answer_effort},
             # Caches the conversation prefix so follow-up turns re-read the

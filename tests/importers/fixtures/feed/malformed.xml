@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Broken Feed</title>
+    <link>https://broken.example.org</link>
+    <item>
+      <title>Good item</title>
+      <link>https://broken.example.org/a</link>
+      <description>Fine.</description>
+      <pubDate>Mon, 12 Feb 2024 16:45:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Smith & Wesson recall</title>
+      <link>https://broken.example.org/b</link>
+    </item>
+  </channel>
+</rss>

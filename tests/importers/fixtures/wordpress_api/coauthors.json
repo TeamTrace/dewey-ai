@@ -1,0 +1,15 @@
+{
+ "101": [
+  {"id": 3, "display_name": "Jane Q. Reporter", "description": {"raw": "Jane covers county government.", "rendered": "<p>Jane covers county government.</p>\n"}, "user_nicename": "jreporter", "link": "https://www.example-ledger.com/author/jreporter/", "featured_media": 0, "avatar_urls": {"24": "https://secure.gravatar.com/avatar/1f3870be274f6c49b3e31a0c6728957f?s=24&d=mm&r=g"}}
+ ],
+ "102": [
+  {"id": 4, "display_name": "Mar&iacute;a Gonz&aacute;lez", "description": {"raw": "", "rendered": ""}, "user_nicename": "mgonzalez", "link": "https://www.example-ledger.com/author/mgonzalez/", "featured_media": 0, "avatar_urls": {"24": "https://secure.gravatar.com/avatar/3c59dc048e8850243be8079a5c74d079?s=24&d=mm&r=g"}},
+  {"id": 2210, "display_name": "Sam O'Neil", "description": {"raw": "Sam O'Neil is a freelance writer.", "rendered": "<p>Sam O&#8217;Neil is a freelance writer.</p>\n"}, "user_nicename": "sam-oneil", "link": "https://www.example-ledger.com/author/sam-oneil/", "featured_media": 2214, "avatar_urls": {}}
+ ],
+ "107": [
+  {"id": 3, "display_name": "Jane Q. Reporter", "description": {"raw": "Jane covers county government.", "rendered": "<p>Jane covers county government.</p>\n"}, "user_nicename": "jreporter", "link": "https://www.example-ledger.com/author/jreporter/", "featured_media": 0, "avatar_urls": {}}
+ ],
+ "111": [
+  {"id": 2230, "display_name": "Priya Natarajan", "description": {"raw": "", "rendered": ""}, "user_nicename": "priya-natarajan", "link": "https://www.example-ledger.com/author/priya-natarajan/", "featured_media": 0, "avatar_urls": {}}
+ ]
+}

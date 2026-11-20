@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="Shift_JIS"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>例示新聞 ニュース</title>
+    <link>https://sjis.example.jp/</link>
+    <description>地域のニュース（旧CMSのフィード）</description>
+    <item>
+      <title>港の清掃活動に３００人が参加</title>
+      <link>https://sjis.example.jp/news/2024/03/03/harbor.html</link>
+      <description>&lt;p&gt;日曜日、ボランティア３００人が港を清掃した。&lt;/p&gt;&lt;p&gt;市はごみ箱を増やす方針だ。&lt;/p&gt;</description>
+      <dc:creator>田中 愛子</dc:creator>
+      <pubDate>Sun, 03 Mar 2024 10:00:00 +0900</pubDate>
+      <guid>https://sjis.example.jp/news/2024/03/03/harbor.html</guid>
+    </item>
+    <item>
+      <title>新駅の開業、一年遅れに</title>
+      <link>https://sjis.example.jp/news/2024/03/02/station.html</link>
+      <description>&lt;p&gt;新駅の開業は２０２６年にずれ込む。&lt;/p&gt;</description>
+      <pubDate>Sat, 02 Mar 2024 18:30:00 +0900</pubDate>
+      <guid>https://sjis.example.jp/news/2024/03/02/station.html</guid>
+    </item>
+  </channel>
+</rss>

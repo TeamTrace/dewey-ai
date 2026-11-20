@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:app="http://www.w3.org/2007/app"
+      xmlns:at="http://purl.org/atompub/tombstones/1.0"
+      xml:lang="en">
+  <title type="text">Example Newsroom</title>
+  <subtitle>Local news, every day</subtitle>
+  <id>tag:atom.example.org,2024:feed</id>
+  <updated>2024-04-02T14:00:00Z</updated>
+  <link rel="self" type="application/atom+xml" href="atom.xml"/>
+  <link rel="alternate" type="text/html" href="https://atom.example.org/"/>
+  <link rel="next" type="application/atom+xml" href="atom.xml?page=2"/>
+  <link rel="hub" href="https://pubsubhubbub.example.net/"/>
+  <author><name>Example Newsroom</name><uri>https://atom.example.org/</uri></author>
+  <generator uri="https://example.org/cms" version="3.1">ExampleCMS</generator>
+
+  <entry xml:base="https://atom.example.org/news/">
+    <title type="html">Mayor&amp;#8217;s &lt;em&gt;first&lt;/em&gt; 100 days</title>
+    <link rel="alternate" type="text/html" href="2024/04/mayor-100-days"/>
+    <link rel="replies" type="application/atom+xml" href="2024/04/mayor-100-days/comments.xml"/>
+    <id>tag:atom.example.org,2024:story-5001</id>
+    <published>2024-04-02T09:15:00-04:00</published>
+    <updated>2024-04-02T10:00:00-04:00</updated>
+    <author><name>Priya Natarajan</name><email>priya@atom.example.org</email></author>
+    <author><name>Tom Becker</name></author>
+    <category term="city-hall"/>
+    <summary type="text">A look at the mayor's first months.</summary>
+    <content type="html">&lt;p&gt;Mayor Ellen Park marked 100 days in office on Tuesday.&lt;/p&gt;&lt;p&gt;She said housing is &amp;ldquo;job one.&amp;rdquo;&lt;/p&gt;</content>
+  </entry>
+
+  <entry>
+    <title>AT&amp;T &lt; Verizon? Readers weigh in on &amp;amp; phone bills</title>
+    <link href="https://atom.example.org/news/2024/04/phone-bills"/>
+    <id>tag:atom.example.org,2024:story-5000</id>
+    <published>2024-04-01T23:30:00Z</published>
+    <updated>2024-04-01T23:30:00Z</updated>
+    <author><name>Sam Park</name></author>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>We asked readers about their phone bills &amp; got 300 replies.</p>
+        <ul><li>Most pay over $80.</li><li>Few switched carriers.</li></ul>
+        <p>Tell us yours: <a href="https://atom.example.org/form">the form</a>.</p>
+      </div>
+    </content>
+  </entry>
+
+  <entry>
+    <title>Corrections policy</title>
+    <link rel="alternate" href="https://atom.example.org/about/corrections"/>
+    <id>tag:atom.example.org,2024:page-12</id>
+    <updated>2024-03-31T08:00:00Z</updated>
+    <author><name>Standards Desk</name></author>
+    <content type="html">&lt;p&gt;We correct errors promptly.&lt;/p&gt;</content>
+  </entry>
+
+  <entry>
+    <title>Draft: transit budget</title>
+    <link rel="alternate" href="https://atom.example.org/news/2024/04/transit-draft"/>
+    <id>tag:atom.example.org,2024:story-5003</id>
+    <published>2024-04-02T12:00:00Z</published>
+    <updated>2024-04-02T12:00:00Z</updated>
+    <app:control><app:draft>yes</app:draft></app:control>
+    <author><name>Tom Becker</name></author>
+    <content type="html">&lt;p&gt;Not ready.&lt;/p&gt;</content>
+  </entry>
+
+  <entry>
+    <title type="text">Audit report on city fleet</title>
+    <link rel="alternate" type="text/html" href="https://atom.example.org/news/2024/03/fleet-audit"/>
+    <link rel="enclosure" type="application/pdf" href="https://atom.example.org/media/fleet-audit.pdf"/>
+    <id>tag:atom.example.org,2024:story-4990</id>
+    <published>2024-03-30T12:00:00+01:00</published>
+    <updated>2024-03-30T12:00:00+01:00</updated>
+    <summary type="text">The audit found 40 vehicles unused for a year.</summary>
+    <content type="application/pdf" src="https://atom.example.org/media/fleet-audit.pdf"/>
+  </entry>
+
+  <at:deleted-entry ref="tag:atom.example.org,2024:story-4989" when="2024-03-30T13:00:00Z"/>
+</feed>

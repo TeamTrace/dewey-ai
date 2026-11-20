@@ -35,7 +35,7 @@ class AzureOpenAILLM:
     def stream_answer(self, messages: List[Dict[str, Any]], current_date: str) -> Iterator[str]:
         response = self.client.responses.create(
             model=self.config.chat_deployment,
-            instructions=load_answer_prompt(current_date),
+            instructions=load_answer_prompt(current_date, self.newsroom),
             input=messages,
             stream=True,
         )

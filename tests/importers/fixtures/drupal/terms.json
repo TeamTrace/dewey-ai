@@ -1,0 +1,146 @@
+[
+  {
+    "type": "taxonomy_term--authors",
+    "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000031",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/taxonomy_term/authors/c3a9e2f1-7d4b-4e5a-8c6d-000000000031"
+      }
+    },
+    "attributes": {
+      "drupal_internal__tid": 31,
+      "drupal_internal__revision_id": 31,
+      "langcode": "en",
+      "status": true,
+      "name": "Maria Lopez",
+      "description": null,
+      "weight": 0,
+      "changed": "2023-01-05T16:20:00+00:00",
+      "default_langcode": true,
+      "path": {
+        "alias": null,
+        "pid": null,
+        "langcode": "en"
+      }
+    },
+    "relationships": {
+      "vid": {
+        "data": {
+          "type": "taxonomy_vocabulary--taxonomy_vocabulary",
+          "id": "7f0b6c8d-5a4e-4b3c-9d2e-1f0a9b8c7d6e",
+          "meta": {
+            "drupal_internal__target_id": "authors"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "taxonomy_term--authors",
+    "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000032",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/taxonomy_term/authors/c3a9e2f1-7d4b-4e5a-8c6d-000000000032"
+      }
+    },
+    "attributes": {
+      "drupal_internal__tid": 32,
+      "drupal_internal__revision_id": 32,
+      "langcode": "en",
+      "status": true,
+      "name": "Sam O&#039;Neil",
+      "description": null,
+      "weight": 0,
+      "changed": "2023-01-05T16:20:00+00:00",
+      "default_langcode": true,
+      "path": {
+        "alias": null,
+        "pid": null,
+        "langcode": "en"
+      }
+    },
+    "relationships": {
+      "vid": {
+        "data": {
+          "type": "taxonomy_vocabulary--taxonomy_vocabulary",
+          "id": "7f0b6c8d-5a4e-4b3c-9d2e-1f0a9b8c7d6e",
+          "meta": {
+            "drupal_internal__target_id": "authors"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "taxonomy_term--authors",
+    "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000033",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/taxonomy_term/authors/c3a9e2f1-7d4b-4e5a-8c6d-000000000033"
+      }
+    },
+    "attributes": {
+      "drupal_internal__tid": 33,
+      "drupal_internal__revision_id": 33,
+      "langcode": "en",
+      "status": true,
+      "name": "Jae Kim",
+      "description": null,
+      "weight": 0,
+      "changed": "2023-01-05T16:20:00+00:00",
+      "default_langcode": true,
+      "path": {
+        "alias": null,
+        "pid": null,
+        "langcode": "en"
+      }
+    },
+    "relationships": {
+      "vid": {
+        "data": {
+          "type": "taxonomy_vocabulary--taxonomy_vocabulary",
+          "id": "7f0b6c8d-5a4e-4b3c-9d2e-1f0a9b8c7d6e",
+          "meta": {
+            "drupal_internal__target_id": "authors"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "taxonomy_term--authors",
+    "id": "c3a9e2f1-7d4b-4e5a-8c6d-000000000034",
+    "links": {
+      "self": {
+        "href": "{{BASE}}/jsonapi/taxonomy_term/authors/c3a9e2f1-7d4b-4e5a-8c6d-000000000034"
+      }
+    },
+    "attributes": {
+      "drupal_internal__tid": 34,
+      "drupal_internal__revision_id": 34,
+      "langcode": "en",
+      "status": false,
+      "name": "Priya Shah",
+      "description": null,
+      "weight": 0,
+      "changed": "2023-01-05T16:20:00+00:00",
+      "default_langcode": true,
+      "path": {
+        "alias": null,
+        "pid": null,
+        "langcode": "en"
+      }
+    },
+    "relationships": {
+      "vid": {
+        "data": {
+          "type": "taxonomy_vocabulary--taxonomy_vocabulary",
+          "id": "7f0b6c8d-5a4e-4b3c-9d2e-1f0a9b8c7d6e",
+          "meta": {
+            "drupal_internal__target_id": "authors"
+          }
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "jsonapi": {
+    "version": "1.0",
+    "meta": {
+      "links": {
+        "self": {
+          "href": "http://jsonapi.org/format/1.0/"
+        }
+      }
+    }
+  },
+  "data": [],
+  "links": {
+    "self": {
+      "href": "{{BASE}}/jsonapi"
+    },
+    "node--article": {
+      "href": "{{BASE}}/jsonapi/node/article"
+    },
+    "node--page": {
+      "href": "{{BASE}}/jsonapi/node/page"
+    },
+    "node--story": {
+      "href": "{{BASE}}/jsonapi/node/story"
+    },
+    "taxonomy_term--authors": {
+      "href": "{{BASE}}/jsonapi/taxonomy_term/authors"
+    },
+    "taxonomy_term--tags": {
+      "href": "{{BASE}}/jsonapi/taxonomy_term/tags"
+    },
+    "paragraph--text": {
+      "href": "{{BASE}}/jsonapi/paragraph/text"
+    },
+    "user--user": {
+      "href": "{{BASE}}/jsonapi/user/user"
+    },
+    "file--file": {
+      "href": "{{BASE}}/jsonapi/file/file"
+    }
+  }
+}

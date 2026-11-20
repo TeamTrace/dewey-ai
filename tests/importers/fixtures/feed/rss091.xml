@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE rss PUBLIC "-//Netscape Communications//DTD RSS 0.91//EN"
+            "http://my.netscape.com/publish/formats/rss-0.91.dtd">
+<rss version="0.91">
+  <channel>
+    <title>Example Weekly</title>
+    <link>http://weekly.example.com/</link>
+    <description>Old-school feed</description>
+    <language>en-us</language>
+    <item>
+      <title>Caf&eacute; owners&nbsp;rally downtown</title>
+      <link>http://weekly.example.com/2004/06/cafe-rally.html</link>
+      <description>Owners of six caf&eacute;s met on Main&nbsp;Street.</description>
+    </item>
+  </channel>
+</rss>
