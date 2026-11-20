@@ -27,6 +27,12 @@ DATA_FOLDER = REPO_ROOT / "data"
 REQUIRED_FIELDS = ["headline", "content", "url", "authors", "publish_date"]
 
 
+def own_publisher() -> str:
+    """The newsroom whose archive this is, for documents that name no publisher."""
+    from models import NewsroomConfig
+    return NewsroomConfig.from_env().publisher
+
+
 class ConflictingIdsError(Exception):
     """Two input documents with the same id but on different sites: indexing would silently keep only one."""
 
@@ -79,6 +85,10 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
             first = seen.setdefault(aid, (path.name, doc["url"]))
             if _site(first[1]) != _site(doc["url"]):
                 conflicts.append(f"  id {aid}: {first[0]} ({first[1]}) and {path.name} ({doc['url']})")
+            # A document that doesn't say where it came from is the newsroom's own.
+            # Naming it here is what lets an answer distinguish your reporting from
+            # material collected elsewhere.
+            doc.setdefault("publisher", own_publisher())
             documents.append(doc)
             valid += 1
         print(f"✅ Loaded {valid} valid document(s) from {path.name}")
