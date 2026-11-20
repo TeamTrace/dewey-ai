@@ -69,9 +69,14 @@ def schema_sql(embed_dim: int) -> List[str]:
             url          text NOT NULL,
             authors      text[] NOT NULL DEFAULT '{}',
             publish_date timestamptz NOT NULL,
-            content      text NOT NULL
+            content      text NOT NULL,
+            -- Who produced the article. Empty on rows indexed before this column
+            -- existed; the newsroom's own archive is filled in by setup_postgres.
+            publisher    text NOT NULL DEFAULT ''
         )
         """,
+        # CREATE TABLE IF NOT EXISTS leaves an existing table alone, so upgrade it.
+        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS publisher text NOT NULL DEFAULT ''",
         f"""
         CREATE TABLE IF NOT EXISTS chunks (
             chunk_id    text PRIMARY KEY,
@@ -208,7 +213,7 @@ fused AS (
     FROM (SELECT * FROM semantic UNION ALL SELECT * FROM keyword) ranked
     GROUP BY chunk_id
 )
-SELECT c.content, a.url, a.headline, a.authors, a.publish_date
+SELECT c.content, a.url, a.headline, a.authors, a.publish_date, a.publisher
 FROM fused f
 JOIN chunks c ON c.chunk_id = f.chunk_id
 JOIN articles a ON a.id = c.article_id
@@ -303,15 +308,16 @@ class PgVectorStore:
                 with conn.transaction():
                     conn.execute(
                         """
-                        INSERT INTO articles (id, headline, url, authors, publish_date, content)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO articles (id, headline, url, authors, publish_date, content, publisher)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             headline = EXCLUDED.headline, url = EXCLUDED.url,
                             authors = EXCLUDED.authors, publish_date = EXCLUDED.publish_date,
-                            content = EXCLUDED.content
+                            content = EXCLUDED.content, publisher = EXCLUDED.publisher
                         """,
                         (aid, doc["headline"], doc["url"], list(doc["authors"]),
-                         parse(doc["publish_date"]), doc["content"]),
+                         parse(doc["publish_date"]), doc["content"],
+                         str(doc.get("publisher") or "").strip()),
                     )
                     conn.execute("DELETE FROM chunks WHERE article_id = %s", (aid,))
                     with conn.cursor() as cur:
@@ -346,15 +352,16 @@ class PgVectorStore:
 
         order = self.reranker.rank(
             question,
-            [f"{headline}\n\n{content}" for content, _, headline, _, _ in rows],
+            [f"{headline}\n\n{content}" for content, _, headline, _, _, _ in rows],
             top_k=min(TOP_N, len(rows)),
         )
 
         sources = []
         for index in order:
-            content, url, headline, authors, publish_date = rows[index]
+            content, url, headline, authors, publish_date, publisher = rows[index]
             sources.append(json.dumps({
                 "url": url,
+                "publisher": publisher,
                 "publish_date": publish_date.astimezone(timezone.utc).date().isoformat(),
                 "authors": list(authors),
                 "headline": headline,

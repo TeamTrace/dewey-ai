@@ -245,7 +245,9 @@ class PostgresFilterTests(PrivateSchemaMixin, unittest.TestCase):
         params.update(qvec=np.asarray([1.0, 0.0, 0.0], dtype=np.float32), qtext="council budget",
                       k=pgvector_store.CANDIDATES_PER_METHOD, rrf_k=pgvector_store.RRF_K)
         rows = self.conn.execute(HYBRID_SQL.format(where=where), params).fetchall()
-        self.assertEqual(sorted(url.rsplit("/", 1)[1] for _, url, _, _, _ in rows), ["a1", "a2", "a3"])
+        # row is (content, url, headline, authors, publish_date, publisher); index rather
+        # than unpack, so another column added to HYBRID_SQL does not break this.
+        self.assertEqual(sorted(row[1].rsplit("/", 1)[1] for row in rows), ["a1", "a2", "a3"])
 
     def test_index_check_names_a_missing_byline_function(self):
         store = pgvector_store.PgVectorStore(pgvector_store.PgVectorConfig(DATABASE_URL), embedder=None,
