@@ -1,0 +1,38 @@
+# Render Blueprint for Dewey's MCP server. Copy to the repository root as
+# render.yaml. Walkthrough: docs/DEPLOYMENT.md ("Render"). Keys follow Render's
+# own Blueprint guidance: https://github.com/render-oss/skills
+# (skills/render-blueprints, skills/render-web-services).
+#
+# The database is NOT created here: we could not confirm from a Render-owned
+# source that Render Postgres offers pgvector, so DATABASE_URL points at an
+# external Postgres with pgvector (Neon, Supabase, Fly MPG, ...).
+#
+# Secrets are declared with `sync: false`: Render asks for their values when the
+# Blueprint is first created, and they are never stored in git. Later changes
+# (e.g. rotating DEWEY_MCP_TOKEN) are made in the Dashboard.
+
+services:
+  - type: web
+    name: dewey-mcp
+    runtime: docker            # builds ./Dockerfile
+    plan: starter              # plan ID from Render's examples; check current plans. Free
+                               # instances spin down when idle (cold starts, MCP sessions end).
+    # Render sends public traffic to the port in its PORT variable (default often
+    # 10000; see the service's Settings) and needs the app on 0.0.0.0. The
+    # image's own command uses port 8765, so this overrides it; keep the port
+    # here equal to Render's PORT.
+    dockerCommand: python app/mcp_server.py --http --host 0.0.0.0 --port 10000
+    # No healthCheckPath: the MCP endpoint answers 401 without the token, and
+    # Render's default check for web services is a TCP connection to the port.
+    envVars:
+      - key: DEWEY_STACK
+        value: anthropic
+      # --- secrets: values are entered in the Dashboard ---
+      - key: DEWEY_MCP_TOKEN     # 32+ random characters; MCP clients send it as a bearer token
+        sync: false
+      - key: DATABASE_URL        # external Postgres with pgvector; use a TLS (sslmode=require) URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: VOYAGE_API_KEY      # not needed if EMBEDDING_PROVIDER/RERANK_PROVIDER are local/none
+        sync: false

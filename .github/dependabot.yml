@@ -1,0 +1,19 @@
+# Dependabot opens pull requests that update pinned versions, so security fixes in
+# dependencies reach requirements.txt (every package there is pinned, so rebuilding the
+# image alone never updates them). Security updates also need "Dependabot security
+# updates" turned on in the repository's Settings > Code security.
+version: 2
+updates:
+  - package-ecosystem: "pip"          # requirements.txt, requirements-local.txt
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+  - package-ecosystem: "docker"       # the Dockerfile's python base image
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

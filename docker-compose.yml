@@ -1,0 +1,143 @@
+# Dewey's archive engine on one machine: the MCP server and Postgres/pgvector,
+# plus, when you ask for them, the indexer, a localhost demo page and an Ollama
+# model server. Step-by-step: docs/DEPLOYMENT.md.
+#
+#   cp .env.template .env      # set DEWEY_STACK and its keys, POSTGRES_PASSWORD and DEWEY_MCP_TOKEN
+#   docker compose up -d --build
+#
+# Indexer: load the articles in data/*.json into Postgres (re-run after adding articles):
+#   docker compose run --rm -v ./data:/app/data:ro dewey python app/setup_postgres.py
+#
+# The MCP server is then at http://127.0.0.1:8765/mcp on this machine, and at
+# http://dewey-mcp:8765/mcp for containers that join the dewey-mcp-clients
+# network. Clients send "Authorization: Bearer <DEWEY_MCP_TOKEN>" (docs/MCP.md).
+#
+# Optional demo chat page, reachable only from this machine at http://127.0.0.1:7860:
+#   docker compose --profile demo up -d --build
+#
+# Optional open-weight chat model in a container (DEWEY_STACK=open):
+#   set OPEN_LLM_BASE_URL='http://ollama:11434/v1' in .env, then
+#   docker compose --profile ollama up -d
+#   docker compose exec ollama ollama pull qwen3:8b
+
+x-dewey-build: &dewey-build
+  context: .
+  args:
+    INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
+
+services:
+  # The MCP server (Streamable HTTP). `docker compose run --rm dewey <command>`
+  # runs other commands (the indexer, an importer) in the same image.
+  dewey:
+    build: *dewey-build
+    restart: unless-stopped
+    command: ["python", "app/mcp_server.py", "--http", "--host", "0.0.0.0", "--port", "8765"]
+    env_file: .env
+    environment:
+      # Overrides DATABASE_URL from .env so Dewey uses the db service below.
+      # Remove this line to use an external Postgres (Neon, Supabase, ...) set in .env.
+      DATABASE_URL: "postgresql://dewey:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (letters and digits only)}@db:5432/dewey"
+      # Required: Compose stops here when it's missing, instead of starting a server that would refuse.
+      DEWEY_MCP_TOKEN: "${DEWEY_MCP_TOKEN:?Set DEWEY_MCP_TOKEN in .env to a random value of 32 or more characters (see docs/MCP.md)}"
+    volumes:
+      # Downloaded local models (only used with INSTALL_LOCAL_MODELS=true).
+      - hf-cache:/home/dewey/.cache/huggingface
+    ports:
+      # Published on the host's loopback address only: reachable from the host
+      # itself (and a TLS reverse proxy running on it), not from the network.
+      # This needs Docker Engine 28.0+: older versions let machines on the same
+      # local network reach ports published on 127.0.0.1 (docs/DEPLOYMENT.md).
+      # For other machines, put Caddy or nginx with a certificate in front and
+      # point it at 127.0.0.1:8765. Don't change this to "8765:8765" unless
+      # something else (a firewall, a private network) limits who can connect;
+      # the token would then cross the network unencrypted.
+      #
+      # Inside the container the server listens on 0.0.0.0, which turns off the
+      # MCP SDK's Host-header check (DNS-rebinding protection is only applied to
+      # loopback binds), so both 127.0.0.1:8765 and dewey-mcp:8765 work without
+      # extra flags. The bearer token is the guard. Behind a TLS proxy, adding
+      # "--public-url", "https://dewey.example.org/mcp" to the command makes the
+      # server name that address in its 401 responses; it is optional.
+      - "127.0.0.1:8765:8765"
+    networks:
+      default: {}
+      mcp-clients:
+        aliases: [dewey-mcp]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Localhost demo chat page (Gradio). It has no login, so it is published on the
+  # host's 127.0.0.1 only. The container listens on 0.0.0.0 (Docker can't forward
+  # to its loopback), which app/main.py refuses unless told the port is published
+  # on loopback; it still answers only requests addressed to localhost/127.0.0.1.
+  demo:
+    build: *dewey-build
+    profiles: ["demo"]
+    command: ["python", "app/main.py"]
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql://dewey:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (letters and digits only)}@db:5432/dewey"
+      # Pinned so a GRADIO_SERVER_NAME/GRADIO_SERVER_PORT left in .env for local
+      # runs can't move the demo away from the port published below.
+      GRADIO_SERVER_NAME: "0.0.0.0"
+      GRADIO_SERVER_PORT: "7860"
+      DEWEY_DEMO_PUBLISHED_ON_LOOPBACK: "true"
+    volumes:
+      - hf-cache:/home/dewey/.cache/huggingface
+    ports:
+      # Never change this to "7860:7860": the demo has no login.
+      - "127.0.0.1:7860:7860"
+    healthcheck:
+      # "/" answers 200 once the page is up (Host: 127.0.0.1 passes the demo's host check).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dewey
+      POSTGRES_DB: dewey
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (letters and digits only)}"
+    volumes:
+      # Postgres 18+ images keep data under /var/lib/postgresql (not .../data).
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dewey -d dewey"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No "ports:": the database is reachable only from the other services in
+    # this file (not from the dewey-mcp-clients network). For a one-off psql
+    # session use:  docker compose exec db psql -U dewey
+
+  ollama:
+    image: ollama/ollama  # pin a version tag for repeatable deployments
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # Not published to the host; Dewey reaches it at http://ollama:11434/v1.
+    # For an NVIDIA GPU, see https://raw.githubusercontent.com/ollama/ollama/main/docs/docker.mdx
+
+networks:
+  # Only the MCP server joins this network. A chat UI or agent running in its own
+  # Compose project (Open WebUI, LibreChat, ...) can join it as an external network
+  # and reach http://dewey-mcp:8765/mcp, without seeing Postgres. The fixed name
+  # lets other Compose files refer to it. See docs/MCP.md. A second Dewey on the
+  # same machine needs its own name (and alias and port) here, or both would
+  # answer as dewey-mcp (docs/DEPLOYMENT.md, "One Dewey per server").
+  mcp-clients:
+    name: dewey-mcp-clients
+
+volumes:
+  pgdata:
+  hf-cache:
+  ollama:

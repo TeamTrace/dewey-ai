@@ -12,6 +12,14 @@ Sources are JSON strings with keys: url, publish_date, authors, headline, conten
 from typing import Any, Dict, Iterator, List, Protocol
 
 
+class UserFacingError(Exception):
+    """A provider error whose message says what to fix and holds no secrets (no API keys,
+    passwords, connection strings or upstream response bodies with them). The MCP server
+    passes these messages on to its clients; it replaces every other exception's message
+    with a generic one, because exception text from database drivers and SDKs can quote
+    DATABASE_URL, password included."""
+
+
 class LLMProvider(Protocol):
     def generate_metadata(self, messages: List[Dict[str, Any]], current_date: str) -> Dict[str, Any]:
         """Turn the conversation into search metadata (see module docstring)."""

@@ -17,6 +17,7 @@ original pipeline step by step:
 """
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
 from datetime import date, timezone
 from typing import Any, Dict, Iterable, List, Sequence
@@ -26,6 +27,7 @@ import psycopg
 from dateutil.parser import parse
 from pgvector.psycopg import register_vector
 
+from .base import UserFacingError
 from .embeddings import Embedder, Reranker
 
 # Azure's SplitSkill used 512 tokens with 96 overlap. English prose averages
@@ -44,7 +46,7 @@ class PgVectorConfig:
     database_url: str
 
 
-class IndexMismatchError(Exception):
+class IndexMismatchError(UserFacingError):
     """The database was indexed with a different embedding model or dimension."""
 
 
@@ -166,7 +168,7 @@ def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         # The model writes these; drop anything that isn't a YYYY-MM-DD date
         # rather than letting the SQL cast fail the whole request.
         if date_range.get(key) and not _is_iso_date(date_range[key]):
-            print(f"Ignoring unparseable {key}: {date_range[key]!r}")
+            print(f"Ignoring unparseable {key}: {date_range[key]!r}", file=sys.stderr)
             date_range[key] = None
     if date_range.get("start_date"):
         clauses.append("a.publish_date >= (%(start_date)s::date)::timestamp AT TIME ZONE 'UTC'")

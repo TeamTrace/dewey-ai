@@ -103,6 +103,16 @@ def render_answer(text: str, source_urls: Dict[int, str]) -> str:
     return "".join(parts)
 
 
+class _SilentStep:
+    """Step used when show_steps=False (e.g. the MCP server): reports nothing."""
+
+    def start(self, content=""):
+        return None
+
+    def complete(self, content=""):
+        return None
+
+
 class Dewey:
     def __init__(self, llm: LLMProvider, retriever: Retriever):
         # Vendor-specific work lives in providers/; see providers/__init__.py
@@ -112,16 +122,17 @@ class Dewey:
         self.tip_formatter = TipFormatter
 
     @contextmanager
-    def step(self, title, show_steps=True):
+    def step(self, title, steps, show_steps=True):
+        """Add a step to `steps`, the list owned by one process() call. The list is never kept
+        on the instance: the demo page shares one Dewey between overlapping requests, and a
+        shared list would show one person's question in another person's chat."""
         if not show_steps:
-            yield lambda: None
+            # start()/complete() return None, so process() yields only the answer text.
+            yield _SilentStep()
             return
             
         step = {"title": title, "status": "pending"}
-        if not hasattr(self, '_current_steps'):
-            self._current_steps = []
-        
-        self._current_steps.append(step)
+        steps.append(step)
         
         class StepYielder:
             def __init__(self, step, steps_list):
@@ -143,15 +154,15 @@ class Dewey:
                     self.step["content"] = content
                 return "", self.steps_list.copy()
         
-        yielder = StepYielder(step, self._current_steps)
+        yielder = StepYielder(step, steps)
         try:
             yield yielder
         finally:
             step["status"] = "done"
 
     def process(self, message: str, history: List, show_steps: bool=True):
-        # Reset steps
-        self._current_steps = []
+        # This request's steps. A local, not an attribute: see step().
+        steps: List[dict] = []
 
         # Grab the current day
         date_today = datetime.now()
@@ -165,7 +176,7 @@ class Dewey:
         })
         
         # Step 1: Generate metadata
-        with self.step("Generating metadata", show_steps) as step:
+        with self.step("Generating metadata", steps, show_steps) as step:
             if result := step.start("🔍 I'm planning my approach."):
                 yield result
             metadata = self.llm.generate_metadata(messages, formatted_date_today)
@@ -174,7 +185,7 @@ class Dewey:
                 yield result
         
         # Step 2: Search articles  
-        with self.step("Searching articles", show_steps) as step:
+        with self.step("Searching articles", steps, show_steps) as step:
             if result := step.start("🔍 Digging through the archives"):
                 yield result
             sources = self.retriever.retrieve(metadata)
@@ -202,4 +213,4 @@ class Dewey:
             if delta:
                 partial += delta
                 # Escape the model's markup and replace citation patterns with hyperlinks
-                yield render_answer(partial, source_urls), self._current_steps.copy()
+                yield render_answer(partial, source_urls), steps.copy()
