@@ -102,6 +102,7 @@ class ToolsTest(unittest.TestCase):
             "headline": "Council approves 2023 budget",
             "url": "https://news.example.org/2023/03/council-budget",
             "publish_date": "2023-03-01",
+            "publisher": "The Example Times",
             "authors": ["Jane Doe"],
             "text": "The city council approved the 2023 budget on a 9-4 vote. (query: budget)",
         })
