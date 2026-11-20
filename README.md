@@ -38,9 +38,48 @@ pip install -r requirements.txt
 ```
 
 
-## Configuration
+## Choosing a stack
 
-To run this project, you will need to add the following environment variables to your .env file
+Dewey can run on two interchangeable vendor stacks, selected with `DEWEY_STACK` in `.env`:
+
+| Step | `azure` (default) | `anthropic` |
+|---|---|---|
+| Search planning (question, dates, authors) | Azure OpenAI, forced tool call | Claude, structured outputs |
+| Cited answer | Azure OpenAI, streamed | Claude, streamed |
+| Embeddings | Azure OpenAI `text-embedding-3-large` | Voyage AI `voyage-4` |
+| Search engine | Azure AI Search (hybrid + semantic ranker) | Postgres + pgvector (keyword + vector, fused with RRF) |
+| Reranking | Azure semantic ranker | Voyage AI `rerank-3` |
+| Indexing | `app/setup.py` (Blob Storage + Azure indexer) | `app/setup_postgres.py` (runs locally) |
+
+Anthropic does not offer an embedding model; its documentation points to Voyage AI ([Anthropic embeddings guide](https://platform.claude.com/docs/en/build-with-claude/embeddings)), so the `anthropic` stack needs a Voyage key as well as a Claude key. Indexes are **not** portable between stacks: vectors from different embedding models can't be compared, so switching stacks means re-indexing.
+
+### Running on the `anthropic` stack
+
+1. Get credentials:
+   - `ANTHROPIC_API_KEY`: from the Claude Console.
+   - `VOYAGE_API_KEY`: a model API key from MongoDB Atlas → AI Model APIs (Voyage AI is part of MongoDB). Before indexing, check the Atlas organization's Voyage AI data-collection setting (see [What the hosted providers receive](#what-the-hosted-providers-receive)).
+   - `DATABASE_URL`: a Postgres database with the [pgvector](https://github.com/pgvector/pgvector) extension available (self-hosted, or a managed provider that supports pgvector). pgvector 0.8+ is recommended; with older versions, very selective date/author filters can return fewer vector matches.
+2. In `.env`, set `DEWEY_STACK="anthropic"` plus the variables in the `anthropic` section of `.env.template`. Optionally set `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION`.
+3. Put your articles in `data/` (same JSON format as below) and index them:
+   ```bash
+   python app/setup_postgres.py
+   ```
+   This creates the tables and indexes, splits each article into ~380-word chunks with ~70-word overlap (an approximation of the Azure path's 512-token/96-token split), embeds them with Voyage, and stores them. Re-running it updates articles in place.
+4. Launch Dewey as usual: `python app/main.py`.
+
+Model and cost notes: both Claude steps default to `claude-opus-5-5`. The search-planning step runs at `low` effort and the answer at `medium`; override them with `ANTHROPIC_MODEL`, `ANTHROPIC_METADATA_EFFORT` and `ANTHROPIC_ANSWER_EFFORT`. Requests opt into Anthropic's server-side refusal fallback: if a safety classifier declines a request, the API retries it on a fallback model in the same call. If the whole chain declines, Dewey says so in the answer instead of failing silently.
+
+### What the hosted providers receive
+
+Every question a journalist asks leaves your network, and some questions are sensitive (for example, ones that name a confidential source). Check each provider's data-use and retention terms, and the settings you control, before you open Dewey to reporters. The notes below were not verified against the providers' current terms; the linked pages are the authority.
+
+- **Voyage AI (MongoDB Atlas)**, `anthropic` stack: receives every question (as the search query and as the rerank query), the candidate article excerpts sent for reranking and, at indexing time, the whole archive. MongoDB documents that it can collect data sent to the Atlas Embedding and Reranking API and use it to improve Voyage AI models, controlled per organization in Atlas **Organization Settings**. See [Model training data](https://www.mongodb.com/docs/voyageai/management/model-training-data/) and turn data collection off there if you don't want this. The default for a new organization is not verified here.
+- **Anthropic (Claude)**, `anthropic` stack: receives the conversation and the retrieved article text. Retention and use are set by your Anthropic API terms; check them, and any zero-data-retention arrangement your organization has, in the Claude Console.
+- **Azure OpenAI and Azure AI Search**, `azure` stack: receive the conversation, the search query and the retrieved article text. Azure OpenAI's abuse monitoring can keep prompts and outputs for a limited time unless Microsoft has approved your organization for modified abuse monitoring; see Microsoft's "Data, privacy, and security for Azure OpenAI" documentation.
+
+## Configuration (`azure` stack)
+
+To run this project on the default `azure` stack, you will need to add the following environment variables to your .env file
 
 1. Copy environment template
 ```
@@ -68,7 +107,7 @@ AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=..."
 AZURE_STORAGE_CONTAINER_NAME="your-storage-container-name"
 ```
 
-## Deployment
+## Deployment (`azure` stack)
 1. Prepare Your Documents
 
 Any articles you wish to upload should be in JSON format in the `data/` folder. Each document should follow this structure:

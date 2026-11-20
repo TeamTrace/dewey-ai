@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import Union
 
 from azure.core.credentials import AzureKeyCredential
 from azure.core.credentials_async import AsyncTokenCredential

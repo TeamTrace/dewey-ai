@@ -1,30 +1,15 @@
 import gradio as gr
 from dotenv import load_dotenv
 from dewey import Dewey
-from models import AzureSearchConfig, AzureOpenAIConfig
-import os
+from models import NewsroomConfig
+from providers import build_stack
 import uuid
-import json
 
 load_dotenv()
 
-
-oai_config = AzureOpenAIConfig(
-    endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-    api_key=os.environ["AZURE_OPENAI_API_KEY"],
-    embedding_deployment=os.environ["EMBEDDING_DEPLOYMENT_NAME"],
-    embedding_model=os.environ["EMBEDDING_MODEL_NAME"],
-    chat_deployment=os.environ["CHATGPT_DEPLOYMENT_NAME"],
-    chat_model=os.environ["CHATGPT_MODEL_NAME"]
-)
-
-search_config = AzureSearchConfig(
-    service_endpoint=os.environ["AZURE_SEARCH_ENDPOINT"],
-    index_name=os.environ["AZURE_SEARCH_INDEX_NAME"],
-    key=os.environ["AZURE_SEARCH_API_KEY"]
-)
-
-dewey = Dewey(oai_config, search_config)
+# DEWEY_STACK=azure (default) or anthropic; see providers/__init__.py
+llm, retriever = build_stack(NewsroomConfig.from_env())
+dewey = Dewey(llm, retriever)
 
 
 def chat_with_dewey(message, history, session_state):
@@ -68,7 +53,10 @@ with gr.Blocks(title="Dewey") as demo:
     # Session state
     session_state = gr.State({"session_id": None, "user_data": {}})
     
-    chatbot = gr.Chatbot(type="messages", label="Dewey")
+    # Gradio 6 always uses the messages format (no `type`). `buttons=[]` and
+    # `allow_tags=False` keep Gradio 5's defaults: no share/copy buttons, and no
+    # custom HTML tags kept in rendered messages.
+    chatbot = gr.Chatbot(label="Dewey", buttons=[], allow_tags=False)
     msg = gr.Textbox(label="Message", placeholder="Ask your question here...")
     clear = gr.Button("Clear")
     
