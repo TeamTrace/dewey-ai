@@ -100,7 +100,7 @@ A *stack default* can be switched: see [Mixing hosted and local search models](#
 - Microsoft keeps Dewey's responses for 30 days, because Dewey doesn't send `store=false`.
 - Dewey logs each search's bylines and dates to its error output. The Postgres setups don't.
 
-**How it's been tested:** The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. Since this fork began in November 2026, which changed how Dewey filters, cites and shows answers, nobody has run it against Azure. The only automated tests check the date and byline filter Dewey writes for Azure AI Search, and they never contact Azure.
+**How it's been tested:** The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. Since this fork began in November 2026, which changed how Dewey filters, cites and shows answers, nobody has run it against Azure. Automated tests cover only the date and byline filter Dewey writes for Azure AI Search, and what the setup wizard prints and starts on `azure`; none contacts Azure.
 
 **Set it up:** in the setup wizard, choose `azure` at "Which stack?" and answer its 11 Azure questions ([AZURE.md](AZURE.md#with-the-setup-wizard)). Or put these lines in `.env` (a file in [the Dewey folder](GLOSSARY.md#dewey-folder)) with a text editor, not a [terminal](GLOSSARY.md#terminal), changing any that are already there ([how](#configuring-by-hand)):
 
@@ -684,7 +684,7 @@ On pgvector older than 0.8, a search with a date or byline filter can miss stori
 - **The setup wizard's check** prints a result that starts `Postgres: connected, but pgvector 0.6.0 is older than 0.8` (with your version), followed by what to do.
 - **The indexer, the MCP server and the demo page** print a warning that starts `Dewey: warning: the pgvector extension in this database is version 0.6.0`. Each prints it once per run, at its first search (the indexer: when indexing starts), not when it starts up. The warning goes to Dewey's error output, never to the chat: look in the terminal that runs Dewey or, when an AI tool starts Dewey itself, in that tool's log ([MCP.md](MCP.md#security)).
 
-*Not tested by us:* we haven't run Dewey, or the steps below, on a pgvector older than 0.8. That Dewey still runs on pgvector 0.5 to 0.7 follows from pgvector's changelog and Dewey's code. The two steps are pgvector's own ([Upgrading](https://github.com/pgvector/pgvector/blob/master/README.md#upgrading)); pgvector lists nothing else to do afterwards, such as indexing again.
+Dewey's database tests (its tables, filters and searches, this warning and the wizard's check) pass on pgvector 0.6.0 with PostgreSQL 16 (the `pgvector/pgvector:0.6.0-pg16` image, November 2026). *Not tested by us:* 0.5 and 0.7, a real archive on an old pgvector, and the upgrade steps below. The two steps are pgvector's own ([Upgrading](https://github.com/pgvector/pgvector/blob/master/README.md#upgrading)); pgvector lists nothing else to do afterwards, such as indexing again.
 
 **First, back up the database.** Step 1 can replace Postgres's own packages too, and Postgres may restart while that happens: searches fail until it is back. On Linux, with a database called `dewey`, this writes the backup to your home folder:
 
@@ -781,7 +781,7 @@ You can skip the setup wizard and write `.env` yourself, in a [terminal](GLOSSAR
 
    With local search models, also run the two commands under [Local search models](#local-search-models).
 
-2. **Copy the template to `.env`:**
+2. **Copy the template to `.env`.** If the folder already has a `.env`, for example one the setup wizard wrote, skip this command and edit that file: copying the template over it erases your keys and saved passwords.
 
    ```bash
    cp .env.template .env

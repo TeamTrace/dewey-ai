@@ -274,7 +274,7 @@ In Dewey's code: `app/setup/embedding_service.py` (the 1,536 size), `app/setup/s
 
 ## Limits of the azure stack
 
-- **How it's been tested.** Not run against Azure since this fork began in November 2026. The only automated tests check the date and byline filter Dewey writes for Azure AI Search, and they never contact Azure. The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. The fork has since changed how Dewey filters, cites and shows answers, but `app/setup.py` is almost unchanged.
+- **How it's been tested.** Not run against Azure since this fork began in November 2026. Automated tests cover only the date and byline filter Dewey writes for Azure AI Search, and what the setup wizard prints and starts on `azure`; none contacts Azure. The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. The fork has since changed how Dewey filters, cites and shows answers, but `app/setup.py` is almost unchanged.
 - **API version.** Nobody had an Azure account to test with, so it is *unverified* whether Azure still accepts the one Dewey asks for (`2025-03-01-preview`).
 - **Bylines must match exactly**, capitals included, though Dewey's tool description says case doesn't matter: that's true only on the other setups ([the byline rule](MCP.md#the-two-tools)).
 - **Indexing differs:** articles without a byline are skipped, there's no publisher, and nothing is ever deleted ([Prepare your articles](#prepare-your-articles), [Build the search index](#build-the-search-index)).

@@ -814,7 +814,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
    ```bash
    docker logs dewey-db
    ```
-   Wait until `PostgreSQL init process complete; ready for start up.` is followed by `database system is ready to accept connections` (if not, run it again a few seconds later). When the command makes a new container on database files that were already there (after the container was removed, for example), the log has `PostgreSQL Database directory appears to contain a database; Skipping initialization` in place of the first of those two lines ([the image's start script](https://github.com/docker-library/postgres/blob/master/18/bookworm/docker-entrypoint.sh); not tested by us). Then go back to the wizard's window and answer `Y` at `Is it running? (Y/n):`. The wizard saves the address and password (your shell's history also keeps the pasted password). If you answer `n`, it keeps the password in `.env` but writes no address, so the next run prints the same command, or finds the container if you started it meanwhile. The database listens on 127.0.0.1 only, so your network can't reach it (on Linux, with Docker 28.0 or newer).
+   Wait until `PostgreSQL init process complete; ready for start up.` is followed by `database system is ready to accept connections` (if not, run it again a few seconds later). When the command makes a new container on database files that were already there (after the container was removed, for example), the log has `PostgreSQL Database directory appears to contain a database; Skipping initialization` in place of the first of those two lines ([the image's start script](https://github.com/docker-library/postgres/blob/master/18/bookworm/docker-entrypoint.sh); seen in our test run). Then go back to the wizard's window and answer `Y` at `Is it running? (Y/n):`. The wizard saves the address and password (your shell's history also keeps the pasted password). If you answer `n`, it keeps the password in `.env` but writes no address, so the next run prints the same command, or finds the container if you started it meanwhile. The database listens on 127.0.0.1 only, so your network can't reach it (on Linux, with Docker 28.0 or newer).
 
    The command's `--restart unless-stopped` makes the database start again when Docker starts, unless you stopped it yourself ([Docker's restart policies](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md)). Its `-v dewey-db-data:/var/lib/postgresql` keeps the database's files in a Docker volume named `dewey-db-data`, which stays if the container is removed ([Docker's volumes](https://github.com/docker/docs/blob/main/content/manuals/engine/storage/volumes.md); [where the image keeps its data](https://github.com/docker-library/docs/blob/master/postgres/content.md)). This `dewey-db` is separate from the `db` database that Docker Compose runs ([DEPLOYMENT.md](DEPLOYMENT.md#what-the-compose-file-runs)): an archive indexed in one isn't in the other.
 
@@ -822,7 +822,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
    **If Docker doesn't answer** (it isn't running, or your account needs `sudo` for it), the wizard says `Docker didn't answer` and asks `Start Docker, then look again? (Y/n):`. Start Docker, then press Enter. If Docker still doesn't answer, the wizard prints the command anyway and asks `Is it running? (y/N):`. Type `y` only once the database is running: until then the wizard saves nothing about it, not even a new password. With `--dry-run`, the wizard asks Docker nothing, shows the command with PASSWORD in place of a password, and asks you nothing more in this step.
 
-   Tested so far: with Colima on a Mac (November 2026). Not tested: restarting the computer to see the database come back by itself. Automated tests cover what the wizard prints and saves, with a stand-in for Docker; none starts a real database.
+   Tested so far: this command, under another container name and port, with Colima on a Mac (November 2026). It started, kept its restart setting and its named volume, and a container made again on the same volume kept its data and its first password. Not tested: restarting the computer to see the database come back by itself. Automated tests cover what the wizard prints and saves, with a stand-in for Docker; none starts a real database.
 
 9. **Azure.** Its 11 questions are explained in [AZURE.md](AZURE.md#with-the-setup-wizard), which also covers importing ([AZURE.md](AZURE.md#prepare-your-articles)).
 
@@ -1109,7 +1109,7 @@ After a restart, start the parts that don't come back by themselves:
 - uninstalling Docker Desktop
 - `colima delete` (its help warns "This deletes everything"), above all with `--data`
 
-A `dewey-db` made by an earlier version of the wizard has no named volume ("An older dewey-db" under [Troubleshooting](#troubleshooting)), so these also delete its archive, or leave it where Dewey can't find it: `docker rm -v dewey-db`, `docker system prune` while it's stopped, and `docker volume prune` after the container is gone. For one of those, bring the database back with `docker start dewey-db`, never by removing the container and pasting the wizard's `docker run` command: the new container starts empty.
+A `dewey-db` made by an earlier version of the wizard has no named volume ("An older dewey-db" under [Troubleshooting](#troubleshooting)), so these also delete its archive, or leave it where Dewey can't find it: `docker rm -v dewey-db`, `docker system prune` while it's stopped, and `docker volume prune` after the container is gone. To bring an older `dewey-db` back, use `docker start dewey-db`. Never remove the container and paste the wizard's `docker run` command: the new container starts empty.
 
 If that happens, start a new database and index again.
 
@@ -1359,8 +1359,8 @@ docker update --restart unless-stopped dewey-db
    ```bash
    docker rm -f -v dewey-db
    ```
-3. Run the wizard and type `docker` at the Postgres question (the suggested answer may be `yes`), paste its command and answer `Y`. It uses the password already in `.env`, or makes a new one.
-4. Index again:
+3. Run the wizard and type `docker` at the Postgres question (the suggested answer may be `yes`), paste its command and answer `Y`. It uses the password already in `.env`, or makes a new one. The wizard then carries on: when it asks `Index them now?`, type `y` (that is step 4), or press Enter and do step 4 yourself.
+4. Index again, unless the wizard just did:
    ```bash
    python app/setup_postgres.py
    ```

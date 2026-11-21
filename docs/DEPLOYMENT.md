@@ -248,6 +248,7 @@ Dewey runs inside Docker, so you don't need a virtual environment there.
 
 2. **Make a database password and a token.**
    Run each command and copy what it prints.
+   If this folder already has a `.env` from the setup wizard, keep the `POSTGRES_PASSWORD` and `DEWEY_MCP_TOKEN` lines it has, and skip the command for each of them.
    The first makes the database password, letters and digits only because it goes inside a URL:
 
    ```bash
@@ -261,10 +262,16 @@ Dewey runs inside Docker, so you don't need a virtual environment there.
    ```
 
 3. **Create `.env` and fill it in.**
-   Copy the template, and make the copy readable only by you:
+   If this folder already has a `.env`, for example one the setup wizard wrote, do not copy the template: that replaces the whole file, and your keys, your token and the database password the wizard saved would be gone. Edit the file you have instead.
+   Otherwise, copy the template:
 
    ```bash
    cp .env.template .env
+   ```
+
+   Make the file readable only by you:
+
+   ```bash
    chmod 600 .env
    ```
 
