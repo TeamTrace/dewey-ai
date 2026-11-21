@@ -827,7 +827,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 11. **Connect AI tools (MCP).** The wizard saves a secret [bearer token](GLOSSARY.md#bearer-token) for Dewey's [MCP server](GLOSSARY.md#mcp-server) in `.env`, without showing it; a re-run asks `Keep the existing MCP token? (Y/n)`: press Enter. Only AI tools that connect over HTTP use it ([MCP.md](MCP.md#before-you-start-http)).
 
-12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs.
+12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs. On Claude with an `ant auth login` sign-in, `Dewey could not confirm a Claude credential` means the sign-in looks signed out: run the `ant auth login` command printed under it. The wizard carries on meanwhile ([STACKS.md](STACKS.md#claude-anthropic-api)).
 
 13. **Write this to .env? (Y/n)** Press Enter. You should see something like:
     ```text
@@ -839,7 +839,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
     If it says `You're not in a virtual environment.` instead, press Enter (no), then Control+C: your answers are already in `.env`. [Turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each answer.
 
-15. **Check credentials and services** (only when nothing is missing): one line per service ([what to look for](#check-that-it-worked)). It skips a Voyage key (checking "would make a billed API call"), Azure and `ant auth login`.
+15. **Check credentials and services** (only when nothing is missing): one line per service ([what to look for](#check-that-it-worked)). It skips a Voyage key (checking "would make a billed API call") and Azure. For an `ant auth login` sign-in it prints `Claude sign-in: not checked`: it tests only an API key.
 
 16. **Get your archive into Dewey.** At `Where is your archive?`, type your source's name or number (`json`: files already in `data/`); with an empty `data/`, Enter picks `skip`. Accept the 20-article [trial run](GLOSSARY.md#trial-run), check its report and a few stories in the sample file, then choose `full` at `What next?` ([IMPORTING.md](IMPORTING.md#run-an-import)). After a finding marked `needs a look`, the wizard suggests `change` instead. On Windows, the printed `read -rs` and `export` lines work only on macOS and Linux ([the PowerShell way](IMPORTING.md#passwords-and-keys)).
 
@@ -894,6 +894,7 @@ Your computer's section and the wizard's screens give the other download sizes.
      Postgres: ok, pgvector 0.8.7 available
    ```
    On the fully open setup, look for `Chat model server: ok, 'qwen3:8b' is available`. A `FAILED` or `NOT` line says what's wrong ([Troubleshooting](#troubleshooting)); re-run the wizard to check again.
+   With an `ant auth login` sign-in instead of a key, the Claude line reads `Claude sign-in: not checked ...`: the wizard found the sign-in's files but did not test it.
 
 2. **Make sure your archive is indexed.** The indexer's last line looks something like:
    ```text
@@ -1176,7 +1177,8 @@ Find the message you see. Fixes with several commands come after the table.
 | `password authentication failed for user "dewey"` | `.env` has a newer password than the container: see "The database password doesn't match" below. |
 | `port is already allocated`, `ports are not available` or `address already in use` | Another program, often another Postgres, uses port 5432: see "Port 5432 is taken" below. |
 | `Postgres: FAILED:` in the wizard's check | The database isn't running or its address is wrong: [start it](#start-dewey-again-later), then check again. |
-| `This configuration (DEWEY_STACK=anthropic) needs these environment variables:`, or `DEWEY_STACK=anthropic needs a Claude credential.` | A setting or key is missing: run the wizard again and fill it in (for `ant auth login`, see [STACKS.md](STACKS.md#claude-anthropic-api)). |
+| `This configuration (DEWEY_STACK=anthropic) needs these environment variables:`, or `DEWEY_STACK=anthropic needs a Claude credential.` | A setting or key is missing, or the saved sign-in can't be used: the rest of the message says which, and prints the commands to run. Then run the wizard again (for `ant auth login`, see [STACKS.md](STACKS.md#claude-anthropic-api)). |
+| `Dewey: warning: could not confirm a Claude credential.` when Dewey starts, or `Dewey could not confirm a Claude credential` in the wizard | The saved sign-in looks signed out, or can't be used as it is: the lines under the message say which, and what to run (usually `ant auth login`). Until then searches work, but `ask_archive` and the demo page fail. After signing in, a running Dewey needs no restart. |
 | An error about Azure, or `DEWEY_STACK is 'azure' (or unset)`, when you didn't choose Azure | `.env` is missing or has no `DEWEY_STACK` (Dewey then uses `azure`), for example because the wizard stopped before `Write this to .env?`: go to the Dewey folder and run the wizard again. |
 | `Chat model server: FAILED to reach` ... `Is Ollama running?` | Open the Ollama app; on Linux, run `sudo systemctl restart ollama`. |
 | `reachable, but 'qwen3:8b' isn't listed` | Run `ollama pull qwen3:8b`, with your model's name, or fix `OPEN_LLM_MODEL` in `.env`: it must match a name after `found:` exactly. |

@@ -285,6 +285,38 @@ class MainFunctionTest(unittest.TestCase):
             self.assertNotIn("Inquirer", err)
             build_ui.assert_not_called()
 
+    def run_main_with_claude_sign_in(self, case):
+        """main() on the anthropic stack with the real Claude client, in one of the sign-in folders of
+        tests/claude_profiles.py. Only the store is stubbed; building the client sends nothing."""
+        from tests import claude_profiles
+
+        built = claude_profiles.build(self, claude_profiles.scenario(getattr(claude_profiles, case)))
+        env = {"DEWEY_STACK": "anthropic", "NEWSROOM_NAME": "The Example Times",
+               "DATABASE_URL": "postgresql://dewey:pw@db.invalid:5432/dewey", **built.env}
+        with mock.patch("providers.build_pgvector_store", return_value=object()), claude_profiles.no_network():
+            return self.run_main(env)
+
+    def test_missing_named_profile_exits_1_with_a_message_not_a_traceback(self):
+        # Issue #19 (i): ANTHROPIC_PROFILE names a sign-in that isn't saved. Anthropic's client stops on
+        # that even with federation variables set, and its error used to leave main() as a traceback.
+        code, _, err, build_ui = self.run_main_with_claude_sign_in("CASE_1")
+        self.assertEqual(code, 1)
+        self.assertIn("Dewey: DEWEY_STACK=anthropic needs a Claude credential.", err)
+        self.assertIn('ANTHROPIC_PROFILE is set to "gone"', err)
+        self.assertNotIn("Traceback", err)
+        build_ui.assert_not_called()
+
+    def test_signed_out_profile_starts_with_a_warning(self):
+        # Issue #19 (i): after `ant auth logout` the page starts, and says in the terminal why
+        # questions will fail until someone signs in again (no restart is needed then).
+        code, out, err, build_ui = self.run_main_with_claude_sign_in("CASE_3")
+        self.assertEqual(code, 0)
+        build_ui.assert_called_once()
+        self.addCleanup(build_ui.call_args.args[0].llm.client.close)
+        self.assertIn("Dewey: warning: could not confirm a Claude credential.", err)
+        self.assertIn("ant auth login --profile default", err)
+        self.assertNotIn("could not confirm", out)
+
     def test_blank_gradio_variables_are_removed_before_gradio_reads_them(self):
         with mock.patch.dict(os.environ, {"GRADIO_SERVER_PORT": "", "GRADIO_SERVER_NAME": " "}, clear=True), \
                 mock.patch("dotenv.load_dotenv"), \

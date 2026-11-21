@@ -639,15 +639,8 @@ def check_services(values: dict) -> None:
     stack = values["DEWEY_STACK"]
     results = []
 
-    if stack == "anthropic" and values.get("ANTHROPIC_API_KEY"):
-        try:
-            import anthropic
-            anthropic.Anthropic(api_key=values["ANTHROPIC_API_KEY"]).models.list(limit=1)
-            results.append(("Anthropic API key", "ok"))
-        except ImportError:
-            results.append(("Anthropic API key", "skipped (install requirements first)"))
-        except Exception as e:
-            results.append(("Anthropic API key", f"FAILED: {type(e).__name__}: {e}"))
+    if stack == "anthropic":
+        results.append(check_claude(values))
 
     if stack == "open":
         base = (values.get("OPEN_LLM_BASE_URL") or OLLAMA_DEFAULT_URL).rstrip("/")
@@ -1361,48 +1354,84 @@ def get_archive(dry_run: bool = False) -> None:
         return
 
 
-def anthropic_credential_present(values: dict) -> bool:
-    """True when Dewey will find a Claude credential, whether or not it is in .env.
+# ---------------------------------------------------------------- Claude credential
 
-    An `ant auth login` profile and Workload Identity Federation both work without
-    ANTHROPIC_API_KEY, so demanding the key would tell the user Dewey can't start
-    when it can. app/providers/__init__.py holds the canonical version
-    (anthropic_credential_source); this installer is standard library only and runs
-    before the dependencies exist, so it can't import it.
-    tests/install/test_credential_agreement.py keeps the two in step.
+_claude_check = "not loaded yet"
+
+
+def load_claude_credentials():
+    """Dewey's own check of the Claude credential, or None if it can't be loaded.
+
+    An `ant auth login` sign-in and Workload Identity Federation both work without
+    ANTHROPIC_API_KEY, so demanding the key would tell people Dewey can't start when it can.
+    Which credential Dewey's Claude client will use is worked out in
+    app/providers/claude_credentials.py. That file is standard library only, so this installer
+    loads it by its path (importing `providers` would need Dewey's packages, which may not be
+    installed yet). One file, not a copy: the wizard and Dewey's startup can't disagree.
+    It is first loaded after the Python version check, so it never runs on a too-old Python.
     """
-    if values.get("ANTHROPIC_API_KEY", "").strip() or os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip():
-        return True
-    if (os.getenv("ANTHROPIC_FEDERATION_RULE_ID", "").strip()
-            and os.getenv("ANTHROPIC_ORGANIZATION_ID", "").strip()
-            and (os.getenv("ANTHROPIC_IDENTITY_TOKEN", "").strip()
-                 or os.getenv("ANTHROPIC_IDENTITY_TOKEN_FILE", "").strip())):
-        return True
-    config_dir = os.getenv("ANTHROPIC_CONFIG_DIR", "").strip()
-    if not config_dir:
-        config_dir = (os.path.join(os.getenv("APPDATA", ""), "Anthropic") if os.name == "nt"
-                      else os.path.expanduser("~/.config/anthropic"))
+    global _claude_check
+    if _claude_check == "not loaded yet":
+        import importlib.util  # only this function needs it
 
-    def profile_exists(name: str) -> bool:
-        return bool(name) and os.path.isfile(os.path.join(config_dir, "configs", f"{name}.json"))
-
-    named = os.getenv("ANTHROPIC_PROFILE", "").strip()
-    if named:
-        return profile_exists(named)  # a named profile that is missing is an error, not a fall-through
-    try:
-        with open(os.path.join(config_dir, "active_config"), encoding="utf-8") as fh:
-            active = fh.read().strip()
-    except OSError:
-        active = ""
-    return profile_exists(active) or profile_exists("default")
+        path = Path(__file__).resolve().parent / "app" / "providers" / "claude_credentials.py"
+        try:
+            spec = importlib.util.spec_from_file_location("dewey_claude_credentials", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except Exception:  # missing or unreadable (a partial copy of the repository): only a typed key counts
+            module = None
+        _claude_check = module
+    return _claude_check
 
 
-def missing_required(values: dict) -> list:
+def claude_environment(values: dict, env_file: Optional[dict] = None) -> dict:
+    """The variables Dewey's Claude client will see when Dewey is started from this terminal.
+
+    Dewey loads .env and then reads its environment, and python-dotenv never replaces a variable
+    that is already set. So the terminal's variables go over .env's lines (`env_file`: the ones
+    about to be written and the ones kept from before). ANTHROPIC_API_KEY is the wizard's own
+    answer when a key was typed: that is the one being saved.
+    """
+    env = dict(env_file or {})
+    env.update(os.environ)
+    if values.get("ANTHROPIC_API_KEY"):
+        env["ANTHROPIC_API_KEY"] = values["ANTHROPIC_API_KEY"]
+    return env
+
+
+def claude_credential(values: dict, env_file: Optional[dict] = None):
+    """What Dewey's check says about the Claude credential: a ClaudeCredential with a `state` of
+    usable, missing or unconfirmed (see app/providers/claude_credentials.py). None when that
+    file can't be loaded."""
+    check = load_claude_credentials()
+    return check.anthropic_credential_status(claude_environment(values, env_file)) if check else None
+
+
+def anthropic_credential_present(values: dict, env_file: Optional[dict] = None) -> bool:
+    """True when Dewey will find a Claude credential it can use, whether or not it is in .env.
+
+    The same verdict as providers.anthropic_credential_source() gives at Dewey's startup
+    (tests/install/test_credential_agreement.py holds the two together, and against the SDK).
+    A sign-in that looks signed out is not counted, though Dewey still starts with one.
+    """
+    credential = claude_credential(values, env_file)
+    if credential is None:
+        return bool(values.get("ANTHROPIC_API_KEY", "").strip())
+    return credential.state == "usable"
+
+
+def missing_required(values: dict, env_file: Optional[dict] = None) -> list:
+    """The settings Dewey can't start without. `env_file` is what .env will hold (see claude_environment)."""
     stack = values["DEWEY_STACK"]
     need = []
     if stack == "anthropic":
         need.append("DATABASE_URL")
-        if not anthropic_credential_present(values):
+        credential = claude_credential(values, env_file)
+        # Only "missing" goes on the list: there Dewey's Claude client stops, and so does Dewey. A
+        # sign-in that looks signed out ("unconfirmed") gets a warning in the Summary instead: Dewey
+        # starts with it, indexing needs no Claude credential, and the verdict comes from files alone.
+        if credential is None or credential.state == "missing":
             need.append("ANTHROPIC_API_KEY")
     if stack == "open":
         need += ["OPEN_LLM_MODEL", "DATABASE_URL"]
@@ -1411,6 +1440,96 @@ def missing_required(values: dict) -> list:
     if stack == "azure":
         need += [k for k in SECTIONS[-1][1]]
     return [k for k in need if not values.get(k)]
+
+
+def summary_report(values: dict, missing: list, env_file: Optional[dict] = None) -> List[str]:
+    """The Summary's lines after the .env text: what is still missing and, on the Claude stack,
+    what the person should know about the Claude credential before going on.
+
+    The lines about a sign-in come from app/providers/claude_credentials.py, the same ones Dewey
+    prints at startup. No secret is ever part of them.
+    """
+    lines = []
+    if missing:
+        lines.append(f"Still missing: {', '.join(missing)}. Dewey won't start until these are set; "
+                     "re-run this installer or edit .env when you have them.")
+    if values.get("DEWEY_STACK") != "anthropic":
+        return lines
+    typed_key = bool(values.get("ANTHROPIC_API_KEY"))
+    check = load_claude_credentials()
+    if check is None:
+        if not typed_key:
+            lines.append("This wizard could not check for a saved Claude sign-in (app/providers/claude_credentials.py "
+                         "is missing or can't be read), so only an API key counts here.")
+        return lines
+
+    credential = check.anthropic_credential_status(claude_environment(values, env_file))
+    problem = ["  " + line for line in check.credential_problem_lines(credential)]
+    or_a_key = "  Or paste an Anthropic API key at the Claude question when you run this installer again."
+    if credential.state == "missing" and problem:
+        lines.append("About ANTHROPIC_API_KEY: a saved Claude sign-in would do instead of a key, but the one "
+                     "selected can't be used.")
+        lines += problem + [or_a_key]
+    elif credential.state == "unconfirmed":
+        # Not under "Still missing": Dewey starts in this state, and the verdict comes from files alone.
+        lines.append("Dewey could not confirm a Claude credential. It will start, and searches work, but it can't "
+                     "write answers")
+        lines.append("with Claude (ask_archive, the demo page) until this is fixed. Importing and indexing don't "
+                     "need Claude.")
+        lines += problem + [or_a_key]
+    elif credential.source == "ANTHROPIC_API_KEY" and not typed_key:
+        lines.append("ANTHROPIC_API_KEY comes from this terminal and is not saved in .env. Dewey will use it when "
+                     "started from here; a program that starts Dewey by itself (an AI tool, a service) won't have it.")
+
+    # A blank key or token makes Dewey refuse to start whatever else is set. The terminal's value
+    # is the one Dewey sees, even over a key typed here, so the typed key is left out of this view.
+    seen = dict(env_file or {})
+    seen.update(os.environ)
+    for name in check.blank_credential_variables(seen):
+        lines.append(check.blank_credential_message([name], " in this terminal" if name in os.environ else " in .env"))
+    return lines
+
+
+def check_claude(values: dict) -> tuple:
+    """The Claude line of the check step, as (name, status).
+
+    Only an API key typed into the wizard is tested against Anthropic, as before. For any other
+    credential the line says what Dewey's own check found, from files and variables: a sign-in
+    never passes in silence, and a problem always carries the word NOT. Nothing here contacts
+    Anthropic on the strength of a variable alone. .env has been written by now, so its lines are
+    read back.
+    """
+    if values.get("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic
+            anthropic.Anthropic(api_key=values["ANTHROPIC_API_KEY"]).models.list(limit=1)
+            return "Anthropic API key", "ok"
+        except ImportError:
+            return "Anthropic API key", "skipped (install requirements first)"
+        except Exception as e:
+            return "Anthropic API key", f"FAILED: {type(e).__name__}: {e}"
+    check = load_claude_credentials()
+    if check is None:
+        return "Claude credential", "NOT checked: no API key was given, and this wizard could not look for a saved sign-in"
+
+    credential = check.anthropic_credential_status(claude_environment(values, read_env(ENV_PATH)))
+    untested = "not checked (this step tests an API key only)"
+    problem = check.credential_problem_lines(credential)
+    if credential.state == "usable" and credential.source == "profile":
+        how_to_look = "".join("\n      " + line for line in check.ant_status_lines(credential))
+        return "Claude sign-in", f"{untested}; found the saved sign-in {check.quoted_name(credential.profile)}.{how_to_look}"
+    if credential.state == "usable" and credential.source == "ANTHROPIC_API_KEY":
+        return "Anthropic API key", ("not checked: it is set in this terminal, and this step tests only a key "
+                                     "typed into the wizard")
+    if credential.state == "usable":
+        found = ("ANTHROPIC_AUTH_TOKEN is set" if credential.source == "ANTHROPIC_AUTH_TOKEN"
+                 else "Workload Identity Federation variables are set")
+        return "Claude credential", f"{untested}; {found}"
+    if credential.state == "unconfirmed":
+        return "Claude sign-in", f"NOT confirmed: {problem[0]} See the Summary above."
+    if problem:
+        return "Claude credential", f"NOT found: {problem[0]} See the Summary above."
+    return "Claude credential", 'NOT found; see "Still missing" in the Summary above'
 
 
 # ---------------------------------------------------------------- main
@@ -1498,11 +1617,13 @@ def main() -> int:
     content = render_env(to_write, {k: v for k, v in current.items() if k not in managed})
 
     heading("Summary")
-    missing = missing_required(values)
+    # What .env will hold: the lines kept from the previous file and this run's values. Dewey reads
+    # both, so the Claude credential is judged on both (and on this terminal's variables).
+    env_file = {**{k: v for k, v in current.items() if k not in managed}, **to_write}
+    missing = missing_required(values, env_file)
     say(redact(content))
-    if missing:
-        say(f"Still missing: {', '.join(missing)}. Dewey won't start until these are set; "
-            "re-run this installer or edit .env when you have them.")
+    for line in summary_report(values, missing, env_file):
+        say(line)
 
     postgres_stack = stack in ("anthropic", "open")
     if args.dry_run:

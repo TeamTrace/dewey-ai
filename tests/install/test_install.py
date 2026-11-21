@@ -235,6 +235,7 @@ class WizardImportTests(unittest.TestCase):
         shutil.copy2(REPO / "app" / "import_archive.py", self.root / "app" / "import_archive.py")
         shutil.copytree(REPO / "app" / "importers", self.root / "app" / "importers",
                         ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(REPO / "app" / "providers", self.root / "app" / "providers")  # for claude_credentials.py
         (self.root / "data").mkdir()
         (self.root / "bin").mkdir()  # PATH: no ollama or docker, whatever this machine has
 

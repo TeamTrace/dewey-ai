@@ -382,13 +382,28 @@ Then sign in. A browser opens, and you pick the workspace:
 ant auth login
 ```
 
-Dewey's Claude client then uses the sign-in saved under `~/.config/anthropic` (on Windows, `%APPDATA%\Anthropic`). On Linux, get `ant` from its [releases page](https://github.com/anthropics/anthropic-cli/releases). To see which credential Dewey's Claude client will use, run:
+Dewey's Claude client then uses the sign-in saved under `~/.config/anthropic` (on Windows, `%APPDATA%\Anthropic`). On Linux, get `ant` from its [releases page](https://github.com/anthropics/anthropic-cli/releases). To see what the `ant` tool finds in your terminal, run:
 
 ```bash
 ant auth status
 ```
 
-With a sign-in, leave `ANTHROPIC_API_KEY` out of `.env` and out of your terminal: a key always wins. In the setup wizard, press Enter at the key question; if a key is already saved, type `-` instead, since Enter keeps it. The wizard's check step doesn't test the sign-in. By hand, delete the template's `ANTHROPIC_API_KEY` line: a blank value makes Dewey refuse to start. `ANTHROPIC_PROFILE` picks a named sign-in; if that name doesn't exist, the Claude client stops rather than try another credential.
+That is `ant`'s own view, and it can differ from Dewey's: `ant` doesn't read Dewey's `.env`. With `ANTHROPIC_PROFILE` naming a sign-in that isn't saved and Workload Identity Federation variables set, `ant` shows federation as active, while Dewey's Claude client stops (seen with ant 2.12.1, November 2026).
+
+With a sign-in, leave `ANTHROPIC_API_KEY` out of `.env` and out of your terminal: a key always wins. In the setup wizard, press Enter at the key question; if a key is already saved, type `-` instead, since Enter keeps it. By hand, delete the template's `ANTHROPIC_API_KEY` line: a blank value makes Dewey refuse to start. The wizard's check step tests only an API key; for a sign-in it prints `Claude sign-in: not checked`.
+
+Dewey and the wizard look for the sign-in in the same order as Anthropic's client ([credential precedence](https://platform.claude.com/docs/en/manage-claude/wif-reference#credential-precedence), checked November 2026): a key or token first, then the sign-in `ANTHROPIC_PROFILE` names, then Workload Identity Federation variables, then the active sign-in (`default` unless you changed it). They check that the sign-in's files are in place. They don't ask Anthropic whether it still works, so an expired or revoked sign-in passes both.
+
+- **A sign-in that isn't saved.** If `ANTHROPIC_PROFILE` or the active sign-in names one that doesn't exist, or its settings file is damaged, the Claude client doesn't fall back to another credential. The wizard lists `ANTHROPIC_API_KEY` under `Still missing:` and Dewey won't start; both name the sign-in and print the commands that fix it.
+- **Signed out.** After `ant auth logout`, the wizard says `Dewey could not confirm a Claude credential` and carries on: importing and indexing don't use Claude. Dewey starts with the same warning: searches work, but `ask_archive` and the demo page fail until you sign in again. No restart is needed afterwards.
+
+To sign in again under a name:
+
+```bash
+ant auth login --profile NAME
+```
+
+That also makes NAME the active sign-in, for `ant` and for Anthropic's other tools on your computer ([Anthropic's CLI docs](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication) and [active profile](https://platform.claude.com/docs/en/manage-claude/wif-reference#active-profile), checked November 2026). `ANTHROPIC_PROFILE` can go in `.env`: Dewey reads it there, and so does the wizard.
 
 **On a server** (Docker, Fly, Render, a CI job), Dewey can't see the sign-in on your computer. Use an API key, or Workload Identity Federation: short-lived tokens from your platform's identity provider, set up by an Anthropic organization admin ([Anthropic: Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)). Dewey reads `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE`, plus `ANTHROPIC_WORKSPACE_ID` when the rule covers several workspaces.
 
