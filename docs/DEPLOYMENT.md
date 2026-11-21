@@ -153,6 +153,7 @@ Check the plan's limit before you index a large archive.
 
 **Check the pgvector version.**
 Before 0.8, narrow date and byline searches return fewer articles, without any error; Ubuntu 24.04's own package is 0.6.0.
+Dewey warns about an older version in its log, once per run at its first search (the indexer: when indexing starts), and the setup wizard's check flags it; [STACKS.md](STACKS.md#upgrade-pgvector) has the upgrade steps.
 Supabase builds pgvector up to 0.8.2, but a project may run another version ([Supabase's build list](https://github.com/supabase/postgres/blob/develop/nix/ext/versions.json)).
 Run this in the provider's SQL editor, not in a terminal:
 
@@ -219,7 +220,8 @@ To run two, give the second its own network name, alias and host port in its `do
 | `ollama` | `docker compose --profile ollama up -d` | An Ollama model server for `DEWEY_STACK=open`; never published |
 
 `--profile` turns on an optional service.
-The `db` service is separate from the `dewey-db` container that the [setup wizard](GLOSSARY.md#setup-wizard) can start on your own computer: an index built in one isn't in the other.
+The `db` service is separate from the `dewey-db` container that the [setup wizard](GLOSSARY.md#setup-wizard) helps you start on your own computer: an index built in one isn't in the other.
+If the wizard already wrote a `POSTGRES_PASSWORD` line in `.env`, leave it as it is and let Compose use it too: it holds the password the wizard made for `dewey-db`, and the wizard never changes it.
 
 > [!WARNING]
 > **The `ollama` service needs one more setting, or its answers ignore the question.**
@@ -246,6 +248,7 @@ Dewey runs inside Docker, so you don't need a virtual environment there.
 
 2. **Make a database password and a token.**
    Run each command and copy what it prints.
+   If this folder already has a `.env` from the setup wizard, keep the `POSTGRES_PASSWORD` and `DEWEY_MCP_TOKEN` lines it has, and skip the command for each of them.
    The first makes the database password, letters and digits only because it goes inside a URL:
 
    ```bash
@@ -259,10 +262,16 @@ Dewey runs inside Docker, so you don't need a virtual environment there.
    ```
 
 3. **Create `.env` and fill it in.**
-   Copy the template, and make the copy readable only by you:
+   If this folder already has a `.env`, for example one the setup wizard wrote, do not copy the template: that replaces the whole file, and your keys, your token and the database password the wizard saved would be gone. Edit the file you have instead.
+   Otherwise, copy the template:
 
    ```bash
    cp .env.template .env
+   ```
+
+   Make the file readable only by you:
+
+   ```bash
    chmod 600 .env
    ```
 
@@ -299,11 +308,11 @@ Dewey runs inside Docker, so you don't need a virtual environment there.
    - Compose ignores `DATABASE_URL` in `.env` and points Dewey at its own `db` service.
    - Compose reads `.env` [its own way](https://github.com/compose-spec/compose-spec/blob/main/spec.md): only single-quoted values, as `install.py` writes them, are literal. So avoid `$` outside single quotes, and backslashes.
 
-> [!WARNING]
-> **Set the three newsroom settings before you index.**
-> Without them, Dewey uses its original newsroom's defaults: The Philadelphia Inquirer, articles from January 2, 1978, and the Greater Philadelphia Region.
-> Every article without a [publisher](GLOSSARY.md#publisher) is then labelled as the Inquirer's, and the MCP server tells every AI tool it's the Inquirer's archive.
-> To fix it later, correct `.env`, restart the server (step 4) and index again.
+> [!IMPORTANT]
+> **Set the newsroom settings before you index.**
+> `NEWSROOM_NAME` is required: without it the indexer and the MCP server stop with an error. Without `ARCHIVE_START_DATE` Dewey states no start date, and without `DEFAULT_REGION` it assumes no region.
+> Every article without a [publisher](GLOSSARY.md#publisher) is labelled with `NEWSROOM_NAME`, and the MCP server tells every AI tool whose archive it is.
+> To change it later, correct `.env`, restart the server (step 4) and index again.
 
 4. **Start the MCP server and Postgres.**
    The first time, this builds Dewey's image, so it takes a while:
@@ -810,7 +819,7 @@ Set these in `.env`, the Compose file, `fly secrets` or `fly.toml` `[env]`, or t
 | Setting | Default | What it does |
 |---|---|---|
 | `DEWEY_MCP_TOKEN` | required for HTTP | Bearer token clients send: at least 32 letters, digits or `- . _ ~ + /` (and `=` at the end) |
-| `POSTGRES_PASSWORD` | required | Compose only: the bundled Postgres's password, letters and digits |
+| `POSTGRES_PASSWORD` | required | The bundled Postgres's password, letters and digits. The setup wizard writes this line too, when there is none, with the password it makes for its separate `dewey-db` container; it never changes a line that is already there |
 | `INSTALL_LOCAL_MODELS` | `false` | Docker build argument for CPU-only [PyTorch](GLOSSARY.md#pytorch) and the local search models. With Compose, set it in `.env` so rebuilds keep them |
 | `NEWSROOM_NAME` | required ([why](#steps-for-one-server)) | Your newsroom's name; the same on the server and the indexing computer |
 | `ARCHIVE_START_DATE`, `DEFAULT_REGION` | empty | Your earliest article date and region. Empty: Dewey states no start date and assumes no region |
@@ -862,4 +871,5 @@ For `401`, `421 Invalid Host header` or a chat app in Docker that can't connect,
 | Render deploy never becomes healthy | `--port` in `dockerCommand` doesn't match Render's `PORT` |
 | Fly health checks fail | `internal_port` and the check's `port` must both be 8765, the image's port |
 | Clients lose their connection after a quiet period | The platform stopped the idle server (Fly auto-stop, Render free tier): reconnect, or keep it running |
+| `Dewey: warning: the pgvector extension in this database is version` ... `older than 0.8`, in the server's log | Date and byline searches can miss stories until pgvector is upgraded ([steps](STACKS.md#upgrade-pgvector)) |
 | Narrow date or byline searches return too few articles, or indexing fails with prepared-statement errors | Use the direct connection string, not the pooled one, and check that pgvector is 0.8 or newer ([how](#managed-postgres-with-pgvector)) |

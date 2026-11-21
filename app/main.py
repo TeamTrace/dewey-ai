@@ -324,8 +324,15 @@ def build_launch_plan(env: Mapping[str, str]) -> LaunchPlan:
         summary.append("Requests must be addressed to localhost or 127.0.0.1 (blocks DNS rebinding) and "
                        "come from the demo page itself (blocks other web pages).")
     summary.append(f"Answers up to {concurrency} question(s) at once (DEWEY_CONCURRENCY).")
-    summary.append("Telemetry, API page, /monitoring, Gradio's MCP server and share links: off.")
+    summary.append("Telemetry, API page, /monitoring and Gradio's MCP server: off.")
     summary.append("For colleagues and AI tools, use Dewey's MCP server instead: docs/MCP.md.")
+    # These two are Dewey's last lines on stdout, so they sit just above Gradio's own lines
+    # (a warning from build_stack(), on stderr, can still come between them). launch() is not quiet,
+    # because Gradio's "Running on local URL" line is the only place the port actually used is
+    # shown; unless it is quiet, Gradio also prints a tip to set share=True, which would
+    # contradict "share links: off" (tests/deploy/test_main_launch.py pins both lines).
+    summary.append("Share links: off, always. The page has no login, so Dewey never makes a public link.")
+    summary.append("Gradio, which serves the page, prints a tip about share=True when it starts. Ignore it.")
     return LaunchPlan(launch_kwargs, queue_kwargs, summary, warnings)
 
 

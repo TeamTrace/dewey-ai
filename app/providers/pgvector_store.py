@@ -17,17 +17,19 @@ original pipeline step by step:
 """
 import hashlib
 import json
+import re
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import date, timezone
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import psycopg
 from dateutil.parser import parse
 from pgvector.psycopg import register_vector
 
-from .base import UserFacingError
+from .base import UserFacingError, author_names
 from .embeddings import Embedder, Reranker
 
 # Azure's SplitSkill used 512 tokens with 96 overlap. English prose averages
@@ -146,22 +148,21 @@ BYLINE_KEYS_SQL = (
 AUTHOR_MATCH_SQL = f"{BYLINE_KEYS_FUNCTION}(a.authors) && {BYLINE_KEYS_FUNCTION}(%(authors)s::text[])"
 
 
-def _clean_author_names(authors: Any) -> List[str]:
-    """Requested byline names, whitespace-collapsed, without blanks or case-insensitive repeats."""
-    names, seen = [], set()
-    for author in authors or []:
-        name = author.get("name") if isinstance(author, dict) else None
-        if not isinstance(name, str):
-            continue
+def _clean_author_names(names: Iterable[str]) -> List[str]:
+    """Requested byline names, whitespace-collapsed, without case-insensitive repeats. The names
+    come from base.author_names(), which has refused malformed entries and skipped blank ones."""
+    cleaned, seen = [], set()
+    for name in names:
         name = " ".join(name.split())  # str.split() also splits on no-break and other Unicode spaces
         if name and name.casefold() not in seen:
             seen.add(name.casefold())
-            names.append(name)
-    return names
+            cleaned.append(name)
+    return cleaned
 
 
 def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
-    """SQL filter on `articles a`, equivalent to the Azure OData filter. Values are bound, never interpolated."""
+    """SQL filter on `articles a`, equivalent to the Azure OData filter. Values are bound, never interpolated.
+    Raises MetadataError (base.py) for an author entry it can't use, rather than leaving it out."""
     clauses, params = [], {}
     date_range = dict(metadata.get("date_range") or {})
     for key in ("start_date", "end_date"):
@@ -177,7 +178,7 @@ def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         # Inclusive end date in UTC, like `le {end}T23:59:59Z` in the Azure path.
         clauses.append("a.publish_date < (%(end_date)s::date + 1)::timestamp AT TIME ZONE 'UTC'")
         params["end_date"] = date_range["end_date"]
-    authors = _clean_author_names(metadata.get("authors"))
+    authors = _clean_author_names(author_names(metadata))
     if authors:
         # Any listed author, ignoring case and spacing (see _NORMALIZED_NAME), through the
         # articles_byline_keys_idx index. The Azure path's `a eq '...'` is exact; a journalist
@@ -222,6 +223,74 @@ LIMIT %(k)s
 """
 
 
+# ---------- pgvector version ----------
+
+# pgvector 0.8.0 added iterative index scans (hnsw.iterative_scan), which _register() turns on.
+# install.py has its own MIN_PGVECTOR, pgvector_version() and pgvector_version_text(): it is
+# standard library only and runs before this module's packages are installed. A test in
+# tests/providers/test_pgvector_store.py keeps the two in step.
+MIN_PGVECTOR = (0, 8)
+# The numbers a version starts with: "0.6.0" in "0.6.0", "0.8" in "0.8beta". Only the digits
+# 0-9, at most nine to a number, so that nothing else of a version is ever printed and int()
+# can't refuse one.
+_VERSION_NUMBERS = re.compile(r"\s*(([0-9]{1,9})(?:\.([0-9]{1,9}))?(?:\.[0-9]{1,9}){0,2})")
+
+# The once-per-process flag for the warning below: whoever takes this lock first prints the
+# warning, and it is never released. _register() runs on every search, and searches run in
+# worker threads (the MCP server, the demo page), so a plain True/False could be read by two
+# of them before either had set it. Tests put a new Lock here to start again.
+_old_pgvector_warned = threading.Lock()
+
+
+def pgvector_version(text: Any) -> Optional[Tuple[int, int]]:
+    """(major, minor) of a pgvector version such as "0.8.7" or "0.8", to compare as numbers
+    (0.10 is newer than 0.8). None when `text` isn't text that starts with a number."""
+    match = _VERSION_NUMBERS.match(text) if isinstance(text, str) else None
+    return (int(match.group(2)), int(match.group(3) or 0)) if match else None
+
+
+def pgvector_version_text(text: Any) -> Optional[str]:
+    """The part of a version that Dewey repeats in messages: the numbers it starts with
+    ("0.6.0"), never anything else the database reports. None when pgvector_version() is."""
+    match = _VERSION_NUMBERS.match(text) if isinstance(text, str) else None
+    return match.group(1) if match else None
+
+
+def old_pgvector_warning(extversion: Any) -> str:
+    """What Dewey says, once, about a pgvector older than 0.8 or one whose version it can't read."""
+    shown = pgvector_version_text(extversion)
+    if shown is None:
+        found = ("Dewey can't read the version of the pgvector extension in this database, "
+                 "so it treats it as older than 0.8.")
+    else:
+        found = f"the pgvector extension in this database is version {shown}, older than 0.8."
+    return (
+        f"Dewey: warning: {found}\n"
+        "  Searches still run, but date and byline searches can miss stories that match, without any error.\n"
+        "  To fix it:\n"
+        "    1. Install pgvector 0.8 or newer on the database server, if it isn't there already.\n"
+        "    2. Then run this in Dewey's database, as a Postgres superuser:  ALTER EXTENSION vector UPDATE;\n"
+        "  Step by step: 'Upgrade pgvector' in docs/STACKS.md.\n"
+        "  This warning appears once per run, at the first search (for the indexer: when indexing starts).\n"
+        "  It applies to every search until pgvector is upgraded."
+    )
+
+
+def warn_old_pgvector_once(extversion: Any) -> None:
+    """Print old_pgvector_warning() on stderr, at most once per process. Never on stdout, which
+    is the JSON-RPC channel in the MCP server's stdio mode. A warning that can't be written
+    (stderr closed, a broken pipe) is dropped rather than allowed to fail the search."""
+    if not _old_pgvector_warned.acquire(blocking=False):
+        return
+    stream = sys.stderr
+    if stream is None:  # no stderr at all: print(file=None) would write to stdout
+        return
+    try:
+        print(old_pgvector_warning(extversion), file=stream)
+    except (OSError, ValueError):
+        pass
+
+
 class PgVectorStore:
     def __init__(self, config: PgVectorConfig, embedder: Embedder, reranker: Reranker):
         self.config = config
@@ -236,10 +305,17 @@ class PgVectorStore:
         register_vector(conn)
         # pgvector >= 0.8 can keep scanning the HNSW index when a WHERE filter
         # discards candidates; without it, selective date/author filters can
-        # return fewer than k vector matches.
+        # return fewer than k vector matches. An older pgvector doesn't have the
+        # setting, so it gets no SET and one warning per process, as does a
+        # version Dewey can't read. The search goes ahead either way.
         row = conn.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'").fetchone()
-        if row and tuple(int(p) for p in row[0].split(".")[:2]) >= (0, 8):
+        if not row:
+            return
+        version = pgvector_version(row[0])
+        if version is not None and version >= MIN_PGVECTOR:
             conn.execute("SET hnsw.iterative_scan = relaxed_order")
+        else:
+            warn_old_pgvector_once(row[0])
 
     # ---------- setup / indexing ----------
 
@@ -336,9 +412,11 @@ class PgVectorStore:
 
     def retrieve(self, metadata: Dict[str, Any]) -> List[str]:
         question = metadata["question"]
-        qvec = self.embedder.embed([question], input_type="query")[0]
-
+        # First, so a malformed author entry (MetadataError) stops the search before the
+        # embedding call, which can cost money, and before the database is contacted.
         where, params = build_where(metadata)
+
+        qvec = self.embedder.embed([question], input_type="query")[0]
         params.update(qvec=np.asarray(qvec, dtype=np.float32), qtext=question,
                       k=CANDIDATES_PER_METHOD, rrf_k=RRF_K)
 

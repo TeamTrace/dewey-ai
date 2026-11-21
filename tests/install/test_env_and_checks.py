@@ -1,21 +1,28 @@
 """
-Tests for install.py's .env handling (what the Summary and --dry-run print) and
-its credential check against the chat model server. No network: the model
-servers are fake ones on 127.0.0.1.
+Tests for install.py's .env handling (what the Summary and --dry-run print), its
+credential check against the chat model server and its check of the database's
+pgvector version. No network and no database: the model servers are fake ones on
+127.0.0.1, and the Postgres driver is a stand-in. One more test runs the Postgres
+check for real, only when DEWEY_TEST_DATABASE_URL names a throwaway database
+(see tests/providers/test_pgvector_store.py).
 """
 import contextlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import re
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
+DATABASE_URL = os.environ.get("DEWEY_TEST_DATABASE_URL", "").strip()
 
 
 def load_install():
@@ -162,6 +169,222 @@ class ModelServerCheckTests(unittest.TestCase):
             values = install.ask_open_llm({}, interactive=False)
         self.assertEqual(values["OPEN_LLM_API_KEY"], self.KEY)
         self.assertIn("unencrypted", out.getvalue())
+
+
+def postgres_result(shown):
+    """The Postgres result in what check_services() printed: its line and the indented lines
+    under it, whatever the other checks printed before or after."""
+    lines = shown[shown.index("  Postgres: "):].splitlines(keepends=True)
+    count = 1
+    while count < len(lines) and lines[count].startswith("      "):
+        count += 1
+    return "".join(lines[:count])
+
+
+class FakePostgres:
+    """Stands in for the psycopg module. Its one database answers the check's query from
+    `versions` ({"default_version": ..., "installed_version": ...}); None means the server has
+    no pgvector at all. Columns come back in the order the query names them, as from a real
+    database, so a query that leaves one out gets a shorter row."""
+
+    def __init__(self, versions=None, error=None):
+        self.versions, self.error, self.queries = versions, error, []
+
+    def connect(self, url, **kwargs):
+        if self.error:
+            raise self.error
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self.queries.append(sql)
+        return self
+
+    def fetchone(self):
+        if self.versions is None:
+            return None
+        columns = re.search(r"SELECT (.*?) FROM pg_available_extensions", self.queries[-1]).group(1).split(",")
+        return tuple(self.versions[column.strip()] for column in columns)
+
+
+class PostgresCheckTests(unittest.TestCase):
+    """check_services() judges the pgvector version Dewey will get: the one in the database the
+    URL names or, before the extension exists there, the one the server would give it. Older
+    than 0.8 is flagged with what to do; the check never stops the wizard. The driver is a
+    stand-in and the Claude check is kept from running, so nothing here leaves the machine."""
+
+    VALUES = {"DEWEY_STACK": "anthropic", "DATABASE_URL": "postgresql://dewey:DBSECRET@127.0.0.1:5432/dewey"}
+    OLD = "older than 0.8: date and byline searches can miss stories"
+    UPDATE = "ALTER EXTENSION vector UPDATE;"
+    DOCS = "'Upgrade pgvector' in docs/STACKS.md"
+
+    def check(self, postgres):
+        """What check_services() prints about Postgres: its line and the lines under it."""
+        module = None if postgres is None else types.SimpleNamespace(connect=postgres.connect)
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as empty, \
+                mock.patch.dict(os.environ, {"ANTHROPIC_CONFIG_DIR": empty}, clear=True), \
+                mock.patch.object(install, "ENV_PATH", pathlib.Path(empty) / ".env"), \
+                mock.patch.dict(sys.modules, {"psycopg": module, "anthropic": None}), \
+                contextlib.redirect_stdout(out):
+            returned = install.check_services(dict(self.VALUES))
+        shown = out.getvalue()
+        self.assertIsNone(returned)  # a result to read, never a reason to stop the wizard
+        self.assertNotIn("DBSECRET", shown)  # the URL's password (the driver here is a stand-in)
+        return postgres_result(shown)
+
+    def database(self, installed, default):
+        return FakePostgres({"installed_version": installed, "default_version": default})
+
+    def test_an_old_pgvector_is_flagged_with_the_upgrade_steps(self):
+        shown = self.check(self.database(installed="0.6.0", default="0.6.0"))
+        # The guides in docs/ quote these first words, so that a reader can search for them.
+        self.assertEqual(shown.splitlines()[0], "  Postgres: connected, but pgvector 0.6.0 is older than 0.8: "
+                                                "date and byline searches can miss stories")
+        for words in ("install pgvector 0.8 or newer on the database server", "as a Postgres superuser",
+                      self.UPDATE, self.DOCS):
+            self.assertIn(words, shown)
+        for words in ("FAILED", "ok,", "works, but", "already has"):
+            self.assertNotIn(words, shown)
+        # Every line under the result is indented to sit beneath it, down to the pointer to the guide.
+        self.assertEqual(shown.splitlines()[-1], f"      Step by step: {self.DOCS}.")
+
+    def test_the_version_in_this_database_is_judged_not_the_one_on_the_server(self):
+        # Packages upgraded, ALTER EXTENSION never run: Dewey still gets 0.6.0 at every search.
+        shown = self.check(self.database(installed="0.6.0", default="0.8.7"))
+        self.assertTrue(shown.startswith(f"  Postgres: connected, but pgvector 0.6.0 is {self.OLD}\n"), shown)
+        self.assertIn("already has pgvector 0.8.7", shown)
+        self.assertIn(self.UPDATE, shown)
+        self.assertIn(self.DOCS, shown)
+        self.assertNotIn("nstall pgvector", shown)  # nothing left to install: only the update
+        # The other way round is fine: what this database has is new enough.
+        self.assertEqual(self.check(self.database(installed="0.8.0", default="0.8.7")),
+                         "  Postgres: ok, pgvector 0.8.0 available\n")
+
+    def test_before_the_extension_exists_the_version_it_would_get_is_judged(self):
+        shown = self.check(self.database(installed=None, default="0.6.0"))
+        self.assertTrue(shown.startswith(f"  Postgres: connected, but pgvector 0.6.0 is {self.OLD}\n"), shown)
+        self.assertIn("nstall pgvector 0.8 or newer on the database server", shown)
+        self.assertIn(self.DOCS, shown)
+        self.assertNotIn(self.UPDATE, shown)  # nothing in this database to update yet
+        for installed, default in ((None, "0.8.7"), ("0.10.0", "0.10.0"), ("0.8", "0.8.7")):
+            with self.subTest(installed=installed, default=default):
+                self.assertEqual(self.check(self.database(installed, default)),
+                                 f"  Postgres: ok, pgvector {installed or default} available\n")
+
+    def test_a_version_the_check_cannot_read_is_flagged_and_never_repeated(self):
+        # What the database reports reaches the terminal only as numbers.
+        shown = self.check(self.database(installed="zzz\x1b[31m", default="zzz\x1b[31m"))
+        self.assertTrue(shown.startswith("  Postgres: connected, but pgvector's version can't be read, so Dewey "
+                                         f"treats it as {self.OLD}\n"), shown)
+        self.assertIn(self.DOCS, shown)
+        shown += self.check(self.database(installed="0.6.0\x1b[31mRED", default="0.8.7\x1b[31mRED"))
+        self.assertIn(f"  Postgres: connected, but pgvector 0.6.0 is {self.OLD}\n", shown)
+        self.assertIn("already has pgvector 0.8.7,", shown)
+        for raw in ("zzz", "\x1b", "RED", "ok,"):
+            self.assertNotIn(raw, shown)
+        self.assertEqual(self.check(self.database(installed="0.8.7\x1b[31mRED", default="0.8.7")),
+                         "  Postgres: ok, pgvector 0.8.7 available\n")
+
+    def test_nothing_is_guessed_about_a_version_the_check_cannot_read(self):
+        # The lines under the result say only what the check knows. It can't compare a version it
+        # can't read with the server's, so that version gets both steps whatever the server has:
+        # never "The database server already has X, but this database hasn't been updated to it".
+        unreadable = ("  Postgres: connected, but pgvector's version can't be read, so Dewey "
+                      f"treats it as {self.OLD}\n")
+        in_database = {}
+        for default in ("0.8.7", "0.6.0", "zzz", None):
+            with self.subTest(installed="zzz", default=default):
+                shown = in_database[default] = self.check(self.database(installed="zzz", default=default))
+                self.assertTrue(shown.startswith(unreadable), shown)
+                for words in ("install pgvector 0.8 or newer on the database server", "as a Postgres superuser",
+                              self.UPDATE, self.DOCS):
+                    self.assertIn(words, shown)
+                for words in ("already has", "hasn't been", "0.8.7", "0.6.0", "zzz"):
+                    self.assertNotIn(words, shown)
+        with self.subTest("the same lines, whatever the server has"):
+            self.assertEqual(len(set(in_database.values())), 1, in_database)
+        # Before the extension exists in this database there is nothing in it to update, as for a
+        # version the check can read. But the first line has named no version here, so the words
+        # "that is the version the server would give it" would point at nothing.
+        for default in ("zzz", None):
+            with self.subTest(installed=None, default=default):
+                shown = self.check(self.database(installed=None, default=default))
+                self.assertTrue(shown.startswith(unreadable), shown)
+                for words in ("pgvector isn't turned on in this database yet.\n",
+                              "Install pgvector 0.8 or newer on the database server before you index.", self.DOCS):
+                    self.assertIn(words, shown)
+                for words in (self.UPDATE, "that is the version", "zzz"):
+                    self.assertNotIn(words, shown)
+        # After a first line that names the version, those words stay.
+        self.assertIn("pgvector isn't turned on in this database yet; that is the version the server would give it.\n",
+                      self.check(self.database(installed=None, default="0.6.0")))
+
+    def test_the_guides_quote_the_result_as_it_is_printed(self):
+        # A reader finds the right troubleshooting row by searching for the words on their screen,
+        # and the result sends them to a section by its title.
+        shown = self.check(self.database(installed="0.6.0", default="0.6.0"))
+        quoted = shown.splitlines()[0].strip().rsplit(": ", 1)[0]
+        self.assertEqual(quoted, "Postgres: connected, but pgvector 0.6.0 is older than 0.8")
+        for guide in ("INSTALL.md", "STACKS.md"):
+            text = (REPO / "docs" / guide).read_text(encoding="utf-8")
+            self.assertTrue(f"`{quoted}`" in text, f"docs/{guide} no longer quotes {quoted!r}")
+        self.assertIn(self.DOCS, shown)
+        stacks = (REPO / "docs" / "STACKS.md").read_text(encoding="utf-8").splitlines()
+        self.assertIn("Upgrade pgvector", [line.lstrip("#").strip() for line in stacks if line.startswith("#")],
+                      "docs/STACKS.md has no section with that title, which the result names")
+
+    def test_other_results_read_as_before(self):
+        self.assertEqual(self.check(FakePostgres(versions=None)),
+                         "  Postgres: connected, but the pgvector extension is NOT installed on this server\n")
+        self.assertEqual(self.check(FakePostgres(error=RuntimeError("no route to host"))),
+                         "  Postgres: FAILED: RuntimeError: no route to host\n")
+        self.assertEqual(self.check(None), "  Postgres: skipped (install requirements first)\n")
+
+
+@unittest.skipUnless(DATABASE_URL, "set DEWEY_TEST_DATABASE_URL to a throwaway Postgres with pgvector to run")
+class RealPostgresCheckTests(unittest.TestCase):
+    """The same check with the real psycopg, against a real database. It only reads."""
+
+    def test_the_result_matches_the_pgvector_this_database_reports(self):
+        # Written to pass whichever pgvector the database has: the expected line is worked out
+        # from what the database itself reports.
+        try:
+            import psycopg
+        except ImportError as e:
+            self.skipTest(f"needs the packages in requirements.txt ({e})")
+        with psycopg.connect(DATABASE_URL, connect_timeout=5) as conn:
+            row = conn.execute("SELECT default_version, installed_version FROM pg_available_extensions "
+                               "WHERE name = 'vector'").fetchone()
+        # Kept: libpq's own settings (PGPASSWORD, PGSSLMODE...), which may be how this database is reached.
+        env = {name: value for name, value in os.environ.items() if name.startswith("PG")}
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as empty, \
+                mock.patch.dict(os.environ, {**env, "ANTHROPIC_CONFIG_DIR": empty}, clear=True), \
+                mock.patch.object(install, "ENV_PATH", pathlib.Path(empty) / ".env"), \
+                mock.patch.dict(sys.modules, {"anthropic": None}), \
+                contextlib.redirect_stdout(out):
+            install.check_services({"DEWEY_STACK": "anthropic", "DATABASE_URL": DATABASE_URL})
+        shown = postgres_result(out.getvalue())
+        if row is None:
+            self.assertEqual(shown, "  Postgres: connected, but the pgvector extension is NOT installed on this server\n")
+            return
+        default, installed = row
+        judged = default if installed is None else installed
+        # A real pgvector reports plain numbers such as 0.8.7, so this doesn't lean on the wizard's own parser.
+        if tuple(int(n) for n in judged.split(".")[:2]) >= (0, 8):
+            self.assertEqual(shown, f"  Postgres: ok, pgvector {judged} available\n")
+        else:
+            self.assertTrue(shown.startswith(f"  Postgres: connected, but pgvector {judged} is older than 0.8: "
+                                             "date and byline searches can miss stories\n"), shown)
+            self.assertIn("'Upgrade pgvector' in docs/STACKS.md", shown)
+            # The update is offered only when this database has the extension to update.
+            self.assertEqual("ALTER EXTENSION vector UPDATE;" in shown, installed is not None)
 
 
 if __name__ == "__main__":

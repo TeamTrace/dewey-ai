@@ -101,7 +101,7 @@ All checked November 2026. Microsoft's Azure documentation is no longer public o
 The setup wizard writes Dewey's settings to a [`.env` file](GLOSSARY.md#env-file) in the Dewey folder, or you write it by hand.
 
 > [!WARNING]
-> Fill in the newsroom details on either path. Left blank, Dewey's prompts assume The Philadelphia Inquirer's archive, starting January 2, 1978, and questions about the Greater Philadelphia Region. Dewey also gives that name to your AI tool when it describes its tools.
+> Fill in the newsroom name on either path: it is required, and Dewey gives that name to your AI tool when it describes its tools. The earliest date and the region are optional: left blank, Dewey states no start date and assumes no region.
 
 ### With the setup wizard
 
@@ -111,7 +111,7 @@ The setup wizard writes Dewey's settings to a [`.env` file](GLOSSARY.md#env-file
    python install.py
    ```
 
-2. **Choose azure.** At `1. Which stack?`, type `3` and press Enter (Enter alone picks `anthropic`). You should see something like:
+2. **Choose azure.** At `1. Which stack?`, type `3` and press Enter (on a first run, Enter alone picks `anthropic`). You should see something like:
 
    ```text
    Endpoints and keys are on each resource's 'Keys and Endpoint' / 'Access keys' page.
@@ -136,7 +136,7 @@ The setup wizard writes Dewey's settings to a [`.env` file](GLOSSARY.md#env-file
      Wrote /Users/you/dewey-ai/.env
    ```
 
-5. **Let the wizard finish.** It leaves checking Azure to `app/setup.py`, which only checks that the settings are filled in. If `data/` holds article files, it asks `Index them now? (y/N):`. Type `y` only once [What you need in Azure](#what-you-need-in-azure) is done; otherwise press Enter and [build the index](#build-the-search-index) later.
+5. **Let the wizard finish.** It leaves checking Azure to `app/setup.py`, which only checks that the settings are filled in. If `data/` holds article files, it asks `Index them now? (y/N):` (if the wizard's Python lacks Dewey's packages, it says so instead and lists the command under Next steps). Type `y` only once [What you need in Azure](#what-you-need-in-azure) is done; otherwise press Enter and [build the index](#build-the-search-index) later.
 
 ### By hand
 
@@ -274,7 +274,7 @@ In Dewey's code: `app/setup/embedding_service.py` (the 1,536 size), `app/setup/s
 
 ## Limits of the azure stack
 
-- **How it's been tested.** Not run against Azure since this fork began in November 2026, and no automated test covers it. The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. The fork has since changed how Dewey filters, cites and shows answers, but `app/setup.py` is almost unchanged.
+- **How it's been tested.** Not run against Azure since this fork began in November 2026. Automated tests cover only the date and byline filter Dewey writes for Azure AI Search, and what the setup wizard prints and starts on `azure`; none contacts Azure. The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. The fork has since changed how Dewey filters, cites and shows answers, but `app/setup.py` is almost unchanged.
 - **API version.** Nobody had an Azure account to test with, so it is *unverified* whether Azure still accepts the one Dewey asks for (`2025-03-01-preview`).
 - **Bylines must match exactly**, capitals included, though Dewey's tool description says case doesn't matter: that's true only on the other setups ([the byline rule](MCP.md#the-two-tools)).
 - **Indexing differs:** articles without a byline are skipped, there's no publisher, and nothing is ever deleted ([Prepare your articles](#prepare-your-articles), [Build the search index](#build-the-search-index)).

@@ -26,7 +26,7 @@ flowchart LR
 ## What you need
 
 - **A computer:** a Mac, a Windows 10 or 11 PC, or a Linux computer such as Ubuntu, Debian or Fedora. You may need an administrator account to install Python and Docker.
-- **[Python](docs/GLOSSARY.md#python) 3.11, 3.12 or 3.13.** The guides use 3.13. Python 3.14 has to compile three packages and isn't tested; 3.15 doesn't work.
+- **[Python](docs/GLOSSARY.md#python) 3.11, 3.12 or 3.13.** The guides use 3.13. Python 3.14 has to compile three packages and isn't tested; 3.15 doesn't work. The setup wizard checks this before its first question: it stops on a Python it can't use and says how to switch.
 - **[git](docs/GLOSSARY.md#git)**, to download Dewey's code.
 - **A [Postgres](docs/GLOSSARY.md#postgres) database with [pgvector](docs/GLOSSARY.md#pgvector)**, for every setup except Azure. The [setup wizard](docs/GLOSSARY.md#setup-wizard) can give you a [Docker](docs/GLOSSARY.md#docker) command that starts one. Docker Desktop is free for personal use, education, non-commercial open source projects and businesses with fewer than 250 employees and under $10 million in yearly revenue. Other professional use, and any government use, needs a paid plan ([Docker's terms](https://github.com/docker/docs/blob/main/content/includes/desktop-license-update.md), checked November 2026); the [install guide](docs/INSTALL.md) lists free alternatives.
 - **Accounts, depending on the setup.** Dewey has [five setups](docs/STACKS.md#the-setups-at-a-glance); the fully open one needs no accounts, but a capable computer, such as an Apple silicon Mac with 32 GB of memory (an estimate). In the wizard, the [stack](docs/GLOSSARY.md#stack) called `anthropic` means Claude, `open` means [open-weight models](docs/GLOSSARY.md#open-weight-model) (not OpenAI), and `azure` means Microsoft's [Azure OpenAI](docs/GLOSSARY.md#azure-openai) Service.
@@ -107,13 +107,13 @@ Six steps get Dewey running on one computer. If any of this is new to you, follo
    Your prompt now starts with `(.venv)`. Turn it on again in every new terminal window ([how](docs/INSTALL.md#turn-it-on-in-every-new-terminal-window)).
 
 > [!WARNING]
-> Type your newsroom's details when the wizard asks. Left blank, they default to The Philadelphia Inquirer's, and Dewey presents your articles to journalists as the Inquirer's.
+> Type your newsroom's name when the wizard asks: it is required. Dewey labels your articles with it and tells AI tools whose archive this is. The earliest date and the region can be left blank: Dewey then states no start date and assumes no region.
 
 5. **Run the setup wizard.** Not sure which setup to choose? [Compare the setups](docs/STACKS.md#the-setups-at-a-glance) first. On every computer:
    ```bash
    python install.py
    ```
-   It asks for your setup's stack and search models ([what to answer](docs/INSTALL.md#which-setup-to-choose)), shows where to get any accounts and [keys](docs/GLOSSARY.md#api-key), and hides secrets as you type them. It saves your settings in `.env`, a [settings file](docs/GLOSSARY.md#env-file) in the Dewey folder. It can also install Dewey's packages, import your archive (on most setups) and index it. **When it asks `Index them now?`, type `y`:** the default is No.
+   It asks for your setup's stack and search models ([what to answer](docs/INSTALL.md#which-setup-to-choose)), shows where to get any accounts and [keys](docs/GLOSSARY.md#api-key), and hides secrets as you type them. On a first run it marks `anthropic` "(suggested)" at the stack question: that's only what Enter picks, not a recommendation. A `.env` written by hand with no `DEWEY_STACK` line runs `azure` instead ([details](docs/STACKS.md#what-every-setup-has-in-common)). It saves your settings in `.env`, a [settings file](docs/GLOSSARY.md#env-file) in the Dewey folder. It can also install Dewey's packages, import your archive (on most setups) and index it. **When it asks `Index them now?`, type `y`:** the default is No, because indexing can cost money or take a while. If indexing doesn't run, the wizard's last screen shows the command for later.
 
    On Windows, some commands the wizard prints work only on Mac and Linux (a known problem: [#25](https://github.com/TeamTrace/dewey-ai/issues/25)); the install guide's [wizard section](docs/INSTALL.md#what-the-wizard-asks) gives PowerShell versions.
 
@@ -130,6 +130,14 @@ Six steps get Dewey running on one computer. If any of this is new to you, follo
    Open that `Running on local URL` address in your browser. Ignore the `share=True` hint after it: Dewey keeps public links off on purpose. Press Control+C in the terminal to stop the page.
 
    Ask questions you already know the answers to first, and check each citation against its article before you rely on an answer. On setups with a paid chat model, each question costs money. More help: [Try the demo page](docs/INSTALL.md#try-the-demo-page). To use Claude Code or another AI tool instead, see [Connect an AI tool](docs/INSTALL.md#connect-an-ai-tool).
+
+**After a restart,** start Docker again: open Docker Desktop, or run `colima start`; on Linux it starts by itself. A database made with the wizard's Docker command is set to start again with Docker, unless you stopped it yourself. If Dewey can't reach its database, start it. On every computer:
+
+```bash
+docker start dewey-db
+```
+
+More, including databases made by an earlier version of the wizard, which stay stopped: [Start Dewey again later](docs/INSTALL.md#start-dewey-again-later).
 
 ## Where to go next
 
@@ -182,10 +190,10 @@ The same checks run on every pull request and push to main (`.github/workflows/t
 
 <details><summary>Postgres tests (skipped by default)</summary>
 
-The Postgres filter tests in `tests/providers/` are skipped unless `DEWEY_TEST_DATABASE_URL` points at a throwaway Postgres with pgvector. They build Dewey's tables in a schema of their own, adding the `vector` extension there if it's missing. They drop the schema afterwards, so an existing index is untouched. Replace PASSWORD with your test database's password:
+The Postgres tests (the filter tests in `tests/providers/` and the wizard's database check in `tests/install/test_env_and_checks.py`) are skipped unless `DEWEY_TEST_DATABASE_URL` points at a throwaway Postgres with pgvector. They build Dewey's tables in a schema of their own, adding the `vector` extension there if it's missing. They drop the schema afterwards, so an existing index is untouched. Replace PASSWORD with your test database's password:
 
 ```bash
-DEWEY_TEST_DATABASE_URL='postgresql://postgres:PASSWORD@localhost:5432/postgres' python -m unittest tests.providers.test_pgvector_store
+DEWEY_TEST_DATABASE_URL='postgresql://postgres:PASSWORD@localhost:5432/postgres' python -m unittest tests.providers.test_pgvector_store tests.install.test_env_and_checks
 ```
 
 </details>

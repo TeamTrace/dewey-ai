@@ -45,7 +45,7 @@ In every setup, your AI tool's own model also receives the [excerpts](GLOSSARY.m
 
 All five share the [importers](GLOSSARY.md#importer) and article files ([IMPORTING.md](IMPORTING.md#how-importing-works)), the [MCP server](GLOSSARY.md#mcp-server) and its two tools ([MCP.md](MCP.md#the-two-tools)), the demo page and the setup wizard. `search_archive`, the tool Dewey suggests, calls no chat model: your AI tool's own model writes the answer. So the chat model only serves `ask_archive` and the demo page, though the MCP server needs its settings to start.
 
-Dewey runs `azure` when `DEWEY_STACK` isn't set, which makes it the *default*. On a first run, the setup wizard has `anthropic` selected, marked "(current)", which isn't a recommendation. It always writes `DEWEY_STACK` to your [`.env` file](GLOSSARY.md#env-file).
+Dewey runs `azure` when `DEWEY_STACK` isn't set, which makes it the *default*. The setup wizard always writes `DEWEY_STACK` to your [`.env` file](GLOSSARY.md#env-file), so that default only matters for a `.env` written by hand. On a first run the wizard's list starts at `anthropic`, marked "(suggested)": Enter picks it, but it isn't a recommendation. On later runs, "(current)" marks the stack saved in `.env`.
 
 <details>
 <summary>How each stack handles each step</summary>
@@ -100,7 +100,7 @@ A *stack default* can be switched: see [Mixing hosted and local search models](#
 - Microsoft keeps Dewey's responses for 30 days, because Dewey doesn't send `store=false`.
 - Dewey logs each search's bylines and dates to its error output. The Postgres setups don't.
 
-**How it's been tested:** The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. Since this fork began in November 2026, which changed how Dewey filters, cites and shows answers, nobody has run it against Azure, and no automated test covers it.
+**How it's been tested:** The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. Since this fork began in November 2026, which changed how Dewey filters, cites and shows answers, nobody has run it against Azure. Automated tests cover only the date and byline filter Dewey writes for Azure AI Search, and what the setup wizard prints and starts on `azure`; none contacts Azure.
 
 **Set it up:** in the setup wizard, choose `azure` at "Which stack?" and answer its 11 Azure questions ([AZURE.md](AZURE.md#with-the-setup-wizard)). Or put these lines in `.env` (a file in [the Dewey folder](GLOSSARY.md#dewey-folder)) with a text editor, not a [terminal](GLOSSARY.md#terminal), changing any that are already there ([how](#configuring-by-hand)):
 
@@ -382,13 +382,28 @@ Then sign in. A browser opens, and you pick the workspace:
 ant auth login
 ```
 
-Dewey's Claude client then uses the sign-in saved under `~/.config/anthropic` (on Windows, `%APPDATA%\Anthropic`). On Linux, get `ant` from its [releases page](https://github.com/anthropics/anthropic-cli/releases). To see which credential Dewey's Claude client will use, run:
+Dewey's Claude client then uses the sign-in saved under `~/.config/anthropic` (on Windows, `%APPDATA%\Anthropic`). On Linux, get `ant` from its [releases page](https://github.com/anthropics/anthropic-cli/releases). To see what the `ant` tool finds in your terminal, run:
 
 ```bash
 ant auth status
 ```
 
-With a sign-in, leave `ANTHROPIC_API_KEY` out of `.env` and out of your terminal: a key always wins. In the setup wizard, press Enter at the key question; if a key is already saved, type `-` instead, since Enter keeps it. The wizard's check step doesn't test the sign-in. By hand, delete the template's `ANTHROPIC_API_KEY` line: a blank value makes Dewey refuse to start. `ANTHROPIC_PROFILE` picks a named sign-in; if that name doesn't exist, the Claude client stops rather than try another credential.
+That is `ant`'s own view, and it can differ from Dewey's: `ant` doesn't read Dewey's `.env`. With `ANTHROPIC_PROFILE` naming a sign-in that isn't saved and Workload Identity Federation variables set, `ant` shows federation as active, while Dewey's Claude client stops (seen with ant 2.12.1, November 2026).
+
+With a sign-in, leave `ANTHROPIC_API_KEY` out of `.env` and out of your terminal: a key always wins. In the setup wizard, press Enter at the key question; if a key is already saved, type `-` instead, since Enter keeps it. By hand, delete the template's `ANTHROPIC_API_KEY` line: a blank value makes Dewey refuse to start. The wizard's check step tests only an API key; for a sign-in it prints `Claude sign-in: not checked`.
+
+Dewey and the wizard look for the sign-in in the same order as Anthropic's client ([credential precedence](https://platform.claude.com/docs/en/manage-claude/wif-reference#credential-precedence), checked November 2026): a key or token first, then the sign-in `ANTHROPIC_PROFILE` names, then Workload Identity Federation variables, then the active sign-in (`default` unless you changed it). They check that the sign-in's files are in place. They don't ask Anthropic whether it still works, so an expired or revoked sign-in passes both.
+
+- **A sign-in that isn't saved.** If `ANTHROPIC_PROFILE` or the active sign-in names one that doesn't exist, or its settings file is damaged, the Claude client doesn't fall back to another credential. The wizard lists `ANTHROPIC_API_KEY` under `Still missing:` and Dewey won't start; both name the sign-in and print the commands that fix it.
+- **Signed out.** After `ant auth logout`, the wizard says `Dewey could not confirm a Claude credential` and carries on: importing and indexing don't use Claude. Dewey starts with the same warning: searches work, but `ask_archive` and the demo page fail until you sign in again. No restart is needed afterwards.
+
+To sign in again under a name:
+
+```bash
+ant auth login --profile NAME
+```
+
+That also makes NAME the active sign-in, for `ant` and for Anthropic's other tools on your computer ([Anthropic's CLI docs](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication) and [active profile](https://platform.claude.com/docs/en/manage-claude/wif-reference#active-profile), checked November 2026). `ANTHROPIC_PROFILE` can go in `.env`: Dewey reads it there, and so does the wizard.
 
 **On a server** (Docker, Fly, Render, a CI job), Dewey can't see the sign-in on your computer. Use an API key, or Workload Identity Federation: short-lived tokens from your platform's identity provider, set up by an Anthropic organization admin ([Anthropic: Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)). Dewey reads `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE`, plus `ANTHROPIC_WORKSPACE_ID` when the rule covers several workspaces.
 
@@ -531,11 +546,11 @@ On a PC, an NVIDIA card needs about 7.1 GiB for qwen3:8b with a 16k context. A 1
 
 The four Postgres setups find their database through `DATABASE_URL`, written like `postgresql://USER:PASSWORD@HOST:5432/DATABASE`. Percent-encode `%`, `@`, `:`, `/`, `#`, `?` or spaces in the password, such as `%40` for `@`.
 
-Use pgvector 0.8 or newer: with older versions, very selective date or author filters can return fewer articles. Dewey runs `CREATE EXTENSION IF NOT EXISTS vector` itself when it indexes. It was tested with PostgreSQL 18.7 and pgvector 0.8.7, from the wizard's Docker image.
+Use pgvector 0.8 or newer: with older versions, very selective date or author filters can return fewer articles. Dewey tells you when it finds an older one, in the setup wizard's check and in a warning at its first search ([Upgrade pgvector](#upgrade-pgvector)). Dewey runs `CREATE EXTENSION IF NOT EXISTS vector` itself when it indexes. It was tested with PostgreSQL 18.7 and pgvector 0.8.7, from the wizard's Docker image.
 
 | Option | What you do | Notes |
 |---|---|---|
-| The setup wizard's Docker container | Choose `docker` at the wizard's database question: it prints a `docker run` command for `pgvector/pgvector:pg18`, with a generated password | Published on [localhost](GLOSSARY.md#localhost) only. About 165 MB to download (Docker Desktop itself is about 570–630 MB), 0.7 GB on disk. It stays stopped after a restart ([INSTALL.md](INSTALL.md#start-dewey-again-later)) |
+| The setup wizard's Docker container | Choose `docker` at the wizard's database question: it prints a `docker run` command for `pgvector/pgvector:pg18`, with a generated password, or uses the `dewey-db` container you already have | Published on [localhost](GLOSSARY.md#localhost) only. About 165 MB to download (Docker Desktop itself is about 570–630 MB), 0.7 GB on disk. One made with the current command starts again when Docker starts, unless you stopped it yourself, and keeps its data in the Docker volume `dewey-db-data`; one made by an earlier version of the wizard stays stopped after a restart ([INSTALL.md](INSTALL.md#start-dewey-again-later)) |
 | Homebrew, on a Mac | `brew install postgresql@18 pgvector` | Apple silicon only; about 80 MB. Steps below |
 | Postgres.app, on a Mac | Download "Postgres.app with PostgreSQL 18" | Includes pgvector 0.8.7; about 123 MB. Steps below |
 | Linux packages | PostgreSQL's own apt repository, or Fedora's packages | Ubuntu 24.04's own pgvector (0.6.0) is too old. Steps below |
@@ -662,6 +677,73 @@ Checked November 2026:
 
 </details>
 
+#### Upgrade pgvector
+
+On pgvector older than 0.8, a search with a date or byline filter can miss stories that match by meaning, without any error. Stories that match by their words still come back, so nothing looks wrong. When Postgres answers from pgvector's index, the filter is applied only after pgvector has picked its nearest candidates, 40 by default, so a filter that few stories pass can leave very little ([pgvector: filtering](https://github.com/pgvector/pgvector/blob/master/README.md#filtering)). From 0.8.0 on it can keep looking until it has enough ([iterative index scans](https://github.com/pgvector/pgvector/blob/master/README.md#iterative-index-scans)), and Dewey switches that on at every search. Dewey tells you about an older version in two places:
+
+- **The setup wizard's check** prints a result that starts `Postgres: connected, but pgvector 0.6.0 is older than 0.8` (with your version), followed by what to do.
+- **The indexer, the MCP server and the demo page** print a warning that starts `Dewey: warning: the pgvector extension in this database is version 0.6.0`. Each prints it once per run, at its first search (the indexer: when indexing starts), not when it starts up. The warning goes to Dewey's error output, never to the chat: look in the terminal that runs Dewey or, when an AI tool starts Dewey itself, in that tool's log ([MCP.md](MCP.md#security)).
+
+Dewey's database tests (its tables, filters and searches, this warning and the wizard's check) pass on pgvector 0.6.0 with PostgreSQL 16 (the `pgvector/pgvector:0.6.0-pg16` image, November 2026). *Not tested by us:* 0.5 and 0.7, a real archive on an old pgvector, and the upgrade steps below. The two steps are pgvector's own ([Upgrading](https://github.com/pgvector/pgvector/blob/master/README.md#upgrading)); pgvector lists nothing else to do afterwards, such as indexing again.
+
+**First, back up the database.** Step 1 can replace Postgres's own packages too, and Postgres may restart while that happens: searches fail until it is back. On Linux, with a database called `dewey`, this writes the backup to your home folder:
+
+```bash
+sudo -u postgres pg_dump -Fc dewey > ~/dewey.dump
+```
+
+1. **Install pgvector 0.8 or newer on the database server,** the same way pgvector was installed the first time. Skip this step if the wizard's check says the database server already has it.
+
+   *Not tested by us.* On Ubuntu 24.04 with Ubuntu's own PostgreSQL 16, that way gives 0.6.0 again. PostgreSQL's own apt repository has `postgresql-16-pgvector` 0.8.7 ([its package list](https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/)). Installing it from there also replaces Ubuntu's PostgreSQL 16 with that repository's newer build of PostgreSQL 16. Run these one at a time, and press Enter when the second says "Press Enter to continue":
+
+   ```bash
+   sudo apt install -y postgresql-common
+   ```
+
+   ```bash
+   sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+   ```
+
+   ```bash
+   sudo apt install postgresql-16-pgvector
+   ```
+
+   On a hosted database, the provider installs pgvector: see its documentation (not checked by us for any provider).
+
+2. **Update pgvector in Dewey's database.** This needs Postgres's own superuser, so Dewey can't do it for you. On Linux, with a database called `dewey`:
+
+   ```bash
+   sudo -u postgres psql -d dewey -c 'ALTER EXTENSION vector UPDATE'
+   ```
+
+   On a hosted database, run `ALTER EXTENSION vector UPDATE;` in the provider's SQL editor. Whether your provider allows that wasn't checked by us.
+
+**Then check the version** with the query Dewey itself runs at every search. It should show 0.8 or newer:
+
+```sql
+SELECT extversion FROM pg_extension WHERE extname = 'vector';
+```
+
+On Linux, from a terminal:
+
+```bash
+sudo -u postgres psql -d dewey -c "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+```
+
+A running MCP server or demo page needs no restart: its next search reads the new version. The setup wizard's check then says something like `Postgres: ok, pgvector 0.8.7 available`.
+
+<details>
+<summary>Sources</summary>
+
+Checked November 2026:
+
+- pgvector's [Upgrading](https://github.com/pgvector/pgvector/blob/master/README.md#upgrading) section and its [changelog](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md): iterative index scans arrived in 0.8.0, and the HNSW index type, which Dewey's index uses, in 0.5.0. The changelog's last upgrade note is for 0.6.0.
+- Only a superuser can update an extension unless its control file says otherwise ([PostgreSQL: extensions](https://www.postgresql.org/docs/current/extend-extensions.html)), and [pgvector's control file](https://github.com/pgvector/pgvector/blob/master/vector.control) doesn't.
+- Ubuntu 24.04's own [pgvector is 0.6.0](https://packages.ubuntu.com/noble/postgresql-16-pgvector) and its [PostgreSQL 16 is 16.15](https://launchpad.net/ubuntu/noble/+source/postgresql-16). In PostgreSQL's apt repository, `postgresql-16-pgvector` 0.8.7 for Ubuntu 24.04 (the files with `pgdg24.04` in their names) depends on a newer `postgresql-16` than Ubuntu's 16.15; that repository's own 16.16 meets it. This comes from the repository's package index, read on 21 November 2026.
+- What Dewey prints, and when: `app/providers/pgvector_store.py` (the warning) and `install.py` (the wizard's check). Both go by the version in your database: `extversion`, which the wizard reads as `installed_version`. Before pgvector is turned on in that database, the wizard goes by the version the server would give it, `default_version` ([PostgreSQL: pg_available_extensions](https://www.postgresql.org/docs/current/view-pg-available-extensions.html)).
+
+</details>
+
 ## Mixing hosted and local search models
 
 On the two Postgres stacks, `EMBEDDING_PROVIDER` and `RERANK_PROVIDER` choose where each search model runs, separately from the chat model; `azure` ignores both. A setting you leave out takes its stack's default.
@@ -699,7 +781,7 @@ You can skip the setup wizard and write `.env` yourself, in a [terminal](GLOSSAR
 
    With local search models, also run the two commands under [Local search models](#local-search-models).
 
-2. **Copy the template to `.env`:**
+2. **Copy the template to `.env`.** If the folder already has a `.env`, for example one the setup wizard wrote, skip this command and edit that file: copying the template over it erases your keys and saved passwords.
 
    ```bash
    cp .env.template .env
@@ -731,7 +813,7 @@ notepad .env
 </details>
 
 > [!WARNING]
-> **Set the newsroom details, or Dewey describes your archive as The Philadelphia Inquirer's.** Without them, Dewey's prompts assume the Inquirer, an archive starting January 2, 1978, and the Greater Philadelphia Region. On the Postgres setups, articles indexed without a `publisher` field are labelled "The Philadelphia Inquirer" in answers and results. If you already indexed, fix `.env` and run the indexer again to replace the label.
+> **Set the newsroom name: Dewey won't run without it.** `NEWSROOM_NAME` has no default: the indexer, the MCP server and the demo page stop with an error until it is set. Without `ARCHIVE_START_DATE` Dewey states no start date, and without `DEFAULT_REGION` it assumes no region. On the Postgres setups, articles indexed without a `publisher` field are labelled with `NEWSROOM_NAME` in answers and results. Earlier versions used "The Philadelphia Inquirer" when the name was missing: if you indexed that way, set the name and run the indexer again to replace the label.
 
 5. **Set the newsroom details.** Add these lines to `.env` in a text editor (not in a terminal):
 

@@ -25,6 +25,11 @@ from urllib.parse import urlsplit
 from models import NewsroomConfig
 
 from .base import LLMProvider, Retriever
+from .claude_credentials import (
+    MISSING, UNCONFIRMED, USABLE, anthropic_credential_status, blank_credential_message,
+    blank_credential_variables, no_credential_in_client_message, sdk_refusal_message, startup_error,
+    startup_warning, unreadable_address_message,
+)
 
 STACKS = ("azure", "anthropic", "open")
 
@@ -45,55 +50,34 @@ def _require(*names: str) -> None:
         )
 
 
-def _profile_config_path() -> str:
-    """Path to the config file for the profile the SDK would load, or "" if there is none.
-
-    Mirrors the SDK's lookup: $ANTHROPIC_CONFIG_DIR, else ~/.config/anthropic (or
-    %APPDATA%\\Anthropic on Windows); then $ANTHROPIC_PROFILE, else the name in
-    active_config, else "default".
-    """
-    config_dir = os.getenv("ANTHROPIC_CONFIG_DIR", "").strip()
-    if not config_dir:
-        if os.name == "nt":
-            config_dir = os.path.join(os.getenv("APPDATA", ""), "Anthropic")
-        else:
-            config_dir = os.path.expanduser("~/.config/anthropic")
-
-    def config_for(name: str) -> str:
-        path = os.path.join(config_dir, "configs", f"{name}.json")
-        return path if name and os.path.isfile(path) else ""
-
-    named = os.getenv("ANTHROPIC_PROFILE", "").strip()
-    if named:
-        # A named profile that doesn't exist is an error for the SDK, not a fall-through.
-        return config_for(named)
-    try:
-        with open(os.path.join(config_dir, "active_config"), encoding="utf-8") as fh:
-            active = fh.read().strip()
-    except OSError:
-        active = ""
-    return config_for(active) or config_for("default")
-
-
 def anthropic_credential_source() -> str:
-    """Name of the Claude credential the SDK will use, or "" when it would find none.
+    """Name of the Claude credential Dewey's client will use, or "" when Dewey can't count on one.
 
     anthropic_llm.py constructs Anthropic() with no arguments, so the SDK resolves the
-    credential itself. Dewey only checks that one exists, in the SDK's own precedence
-    order, so that a profile from `ant auth login` or a Workload Identity Federation
-    setup isn't rejected as a missing API key.
+    credential itself. claude_credentials.py follows the SDK's own order, so that a sign-in
+    from `ant auth login` or a Workload Identity Federation setup isn't rejected as a missing
+    API key, and one the SDK would refuse isn't counted. "" covers both states that aren't
+    `usable`: a missing credential and a sign-in that looks signed out. install.py loads the
+    same file, so its anthropic_credential_present() always agrees with this.
+
+    build_stack() no longer decides with this: it uses anthropic_credential_status() directly,
+    which tells a missing credential (refuse) from a signed-out sign-in (warn and start). This
+    is kept for the tests that hold Dewey and the wizard together.
     """
-    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-        if os.getenv(var, "").strip():
-            return var
-    if (os.getenv("ANTHROPIC_FEDERATION_RULE_ID", "").strip()
-            and os.getenv("ANTHROPIC_ORGANIZATION_ID", "").strip()
-            and (os.getenv("ANTHROPIC_IDENTITY_TOKEN", "").strip()
-                 or os.getenv("ANTHROPIC_IDENTITY_TOKEN_FILE", "").strip())):
-        return "workload identity federation"
-    if _profile_config_path():
-        return "profile"
-    return ""
+    credential = anthropic_credential_status(os.environ)
+    return credential.source if credential.state == USABLE else ""
+
+
+def _unreadable_address(address: str) -> bool:
+    """True when the HTTP library under the Claude SDK can't read this web address. The SDK hands
+    ANTHROPIC_BASE_URL to the same parser, so this says whether that variable is what stopped it."""
+    import httpx2
+
+    try:
+        httpx2.URL(address)
+    except httpx2.InvalidURL:
+        return True
+    return False
 
 
 def current_stack() -> str:
@@ -136,36 +120,52 @@ def build_stack(newsroom: NewsroomConfig) -> Tuple[LLMProvider, Retriever]:
         )
 
     if stack == "anthropic":
+        import anthropic
+        import httpx2  # the HTTP library the pinned SDK is built on: its InvalidURL is caught below
+
         from .anthropic_llm import DEFAULT_MODEL, AnthropicLLM
 
-        blanked = [v for v in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-                   if v in os.environ and not os.environ[v].strip()]
+        # The Claude client is built with no arguments, so the SDK picks the credential. Each way
+        # the credential or the client's web address can stop that ends here as one plain message,
+        # not as the SDK's traceback. (A proxy or certificate variable the HTTP library refuses for
+        # another reason, such as an unknown proxy scheme, still ends as that library's own error.)
+        blanked = blank_credential_variables(os.environ)
         if blanked:
-            raise StackConfigError(
-                f"{', '.join(blanked)} is set but empty. An empty value still takes precedence over "
-                "a profile and over Workload Identity Federation, so the request would be sent with "
-                "no credential. Remove the line (don't leave it blank) or give it a real value."
-            )
-        if not anthropic_credential_source():
-            named = os.getenv("ANTHROPIC_PROFILE", "").strip()
-            raise StackConfigError(
-                "DEWEY_STACK=anthropic needs a Claude credential. Set ANTHROPIC_API_KEY, or run "
-                "`ant auth login` to store a profile, or set ANTHROPIC_FEDERATION_RULE_ID, "
-                "ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_IDENTITY_TOKEN (or "
-                "ANTHROPIC_IDENTITY_TOKEN_FILE) for Workload Identity Federation. Leave "
-                "ANTHROPIC_API_KEY unset rather than empty: an empty value still takes "
-                "precedence over a profile and over federation."
-                + (f" ANTHROPIC_PROFILE={named!r} is set, but that profile has no config file; "
-                   "the SDK does not try another source when it is set." if named else "")
-            )
+            raise StackConfigError(blank_credential_message(blanked))
+        credential = anthropic_credential_status(os.environ)
+        if credential.state == MISSING:
+            # The SDK would stop in its constructor, or build a client with no credential.
+            raise StackConfigError(startup_error(credential))
         _require("DATABASE_URL")
         retriever = build_pgvector_store()
-        llm = AnthropicLLM(
-            newsroom,
-            model=os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL),
-            metadata_effort=os.getenv("ANTHROPIC_METADATA_EFFORT", "low"),
-            answer_effort=os.getenv("ANTHROPIC_ANSWER_EFFORT", "medium"),
-        )
+        try:
+            llm = AnthropicLLM(
+                newsroom,
+                model=os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL),
+                metadata_effort=os.getenv("ANTHROPIC_METADATA_EFFORT", "low"),
+                answer_effort=os.getenv("ANTHROPIC_ANSWER_EFFORT", "medium"),
+            )
+        except (anthropic.AnthropicError, UnicodeDecodeError) as e:
+            # Backstop: the check above reads files and doesn't see everything the SDK refuses
+            # (file permissions, symlinks, a base URL that isn't https). UnicodeDecodeError is what
+            # the SDK lets out for an active_config file that isn't text.
+            raise StackConfigError(sdk_refusal_message(e, os.environ, credential)) from None
+        except httpx2.InvalidURL:
+            # A web address the HTTP library can't read: ANTHROPIC_BASE_URL, "base_url" in the
+            # sign-in's settings file, or a proxy variable. Its message quotes the part it stopped
+            # at, which can be part of a password, so it is not repeated (as for DATABASE_URL).
+            raise StackConfigError(unreadable_address_message(
+                os.environ, credential, _unreadable_address(os.environ.get("ANTHROPIC_BASE_URL", "")))) from None
+        if all(getattr(llm.client, held, None) is None for held in ("api_key", "auth_token", "credentials")):
+            # In the default location the SDK skips a sign-in it can't load and says nothing; the
+            # first question would then fail with "Could not resolve authentication method".
+            llm.client.close()
+            raise StackConfigError(no_credential_in_client_message())
+        if credential.state == UNCONFIRMED:
+            # A signed-out sign-in: the client exists but its first request will fail. Warn and
+            # start, since searches don't call Claude. stderr, not stdout: stdout is the MCP
+            # server's JSON-RPC channel.
+            print(startup_warning(credential), file=sys.stderr)
         return llm, retriever
 
     # stack == "open"

@@ -17,7 +17,10 @@ installed. It:
      services it can reach;
   5. for the Postgres stacks, helps get the archive into data/ with one of
      the importers in app/importers/ (a small trial run first), then
-     optionally indexes the articles in data/.
+     optionally indexes the articles in data/, if the Python running it has
+     Dewey's packages;
+  6. lists what is left to do, in order, with the commands, and shows how to
+     connect an AI tool, naming a Python that has Dewey's packages.
 
 Re-running it is safe: values already in .env are offered as defaults, so you
 can change one option without re-entering everything.
@@ -41,11 +44,17 @@ import webbrowser
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
-MIN_PYTHON = (3, 11)  # README badge and docs/INSTALL.md: Python 3.11-3.13
+MIN_PYTHON = (3, 11)      # the oldest Python every pin in requirements.txt accepts
+TESTED_PYTHON = (3, 13)   # the newest Python CI runs; the guides and LINKS["python"] use it
+TOO_NEW_PYTHON = (3, 15)  # the first Python the pins can't be installed on (voyageai==0.6.0 needs < 3.15)
+# Every message about Python versions takes its numbers from these three. Versions between
+# TESTED_PYTHON and TOO_NEW_PYTHON (3.14 today) get a note, not a refusal: the pins accept
+# them, but nothing here tests them. tests/install/test_python_check.py ties the three to
+# requirements.txt, the CI matrix, the README and docs/INSTALL.md.
 
 # Where users get each account or tool. Sources: Anthropic's embeddings guide
 # (Voyage keys come from MongoDB Atlas), Ollama's README, pgvector's README.
@@ -63,6 +72,12 @@ LINKS = {
 }
 PGVECTOR_DOCKER_IMAGE = "pgvector/pgvector:pg18"  # tag list: pgvector README, Docker section
 PGVECTOR_CONTAINER = "dewey-db"  # the container name the Postgres step suggests
+# A named volume, so removing the container doesn't delete the index. Postgres 18+ images keep
+# their data under this path, not .../data (their entrypoint refuses a new database mounted
+# there); docker-compose.yml mounts its own volume at the same path.
+PGVECTOR_VOLUME = "dewey-db-data"
+PGVECTOR_MOUNT = "/var/lib/postgresql"
+DOCKER_LOOK_TIMEOUT = 15  # seconds for each question to Docker; Docker Desktop can take 3 to 10 to wake up
 OLLAMA_DEFAULT_URL = "http://localhost:11434/v1"
 OLLAMA_MODEL_SUGGESTIONS = [
     ("qwen3:8b", "Qwen3-8B, 8B parameters, Apache 2.0. Smaller; a reasonable start on a laptop."),
@@ -200,8 +215,11 @@ def ask_yes(prompt: str, default: bool = True) -> bool:
             return False
 
 
-def choose(prompt: str, options, default: str, mark: str = "current") -> str:
-    """options: list of (value, description)."""
+def choose(prompt: str, options, default: str, mark: str) -> str:
+    """options: list of (value, description). `mark` says, in the list, what the Enter default is:
+    "current" for a value saved in .env, "suggested" for the wizard's own starting point,
+    "default" for what a step does when nothing is chosen. It has no default of its own, so that
+    no question can call its starting point "current" by accident."""
     say(prompt)
     for i, (value, desc) in enumerate(options, 1):
         marker = paint(f" ({mark})", GOLD) if value == default else ""
@@ -214,6 +232,17 @@ def choose(prompt: str, options, default: str, mark: str = "current") -> str:
         if raw.isdigit() and 1 <= int(raw) <= len(values):
             return values[int(raw) - 1]
         say(f"  Please enter 1-{len(values)} or one of: {', '.join(values)}")
+
+
+def saved_or_suggested(cur: dict, key: str, options, suggestion: str):
+    """(default, mark) for choose(): the value saved in .env under `key`, marked "current", when
+    it is one of the options; otherwise the wizard's own starting point, marked "suggested".
+    A first run has nothing saved, so it never shows "(current)". Dewey lower-cases these
+    settings when it reads them, so the saved value is compared the same way."""
+    saved = (cur.get(key) or "").strip().lower()
+    if saved in [value for value, _ in options]:
+        return saved, "current"
+    return suggestion, "suggested"
 
 
 def offer_link(label: str, url: str, interactive: bool = True) -> None:
@@ -323,23 +352,371 @@ def write_env(content: str) -> None:
     say(f"  Wrote {ENV_PATH}")
 
 
+# ------------------------------------------ Python version and virtual environment
+#
+# This runs on Python 3.9 (macOS's own /usr/bin/python3): the version check has to be able to
+# say "too old" there. So the whole file must keep loading on 3.9: no newer syntax, no `X | Y`
+# in annotations, no top-level import that 3.9 lacks (tests/install/test_python_check.py).
+
+@dataclass
+class PythonSituation:
+    """Where the Python running this wizard lives, and whether the Dewey folder has a virtual
+    environment. Kept apart from the wording, so tests can describe any computer."""
+    system: str               # "mac", "linux" or "windows": whose commands to print
+    root: str                 # the Dewey folder
+    in_root: bool             # the terminal's current folder is the Dewey folder
+    venv: str                 # the virtual environment this Python belongs to; "" when none
+    in_dewey_venv: bool       # that environment is the Dewey folder's .venv
+    dewey_venv_exists: bool   # the Dewey folder has a .venv that works: it has its Python, and is where it was made
+    dewey_venv_broken: bool = False  # it has a .venv folder that is not a working environment
+    dewey_venv_moved: bool = False   # ...because the Dewey folder was renamed or moved after it was made
+
+    @property
+    def dewey_venv_is_off(self) -> bool:
+        """The Dewey folder has a working .venv and this Python is not in it: it only has to be
+        turned on. True as well when another project's environment is on in this terminal."""
+        return self.dewey_venv_exists and not self.in_dewey_venv
+
+
+def python_verdict(version=None) -> str:
+    """One of "ok", "old", "new", "untested" for a Python version (this one when none is given)."""
+    version = tuple((version or sys.version_info)[:2])
+    if version < MIN_PYTHON:
+        return "old"
+    if version >= TOO_NEW_PYTHON:
+        return "new"
+    return "untested" if version > TESTED_PYTHON else "ok"
+
+
+def in_virtualenv() -> bool:
+    """True when this Python belongs to a virtual environment: any one, not only Dewey's .venv."""
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+
+def venv_python(windows: Optional[bool] = None) -> Path:
+    """Where the Python of the Dewey folder's .venv is, whether or not it exists. Not resolved:
+    it is a link to the Python the environment was made with."""
+    windows = os.name == "nt" if windows is None else windows
+    return ROOT / ".venv" / ("Scripts/python.exe" if windows else "bin/python")
+
+
+def _is_there(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+# The line of a virtual environment's bin/activate that records the folder it was made in:
+# VIRTUAL_ENV="FOLDER" (Python 3.9.6), export VIRTUAL_ENV="FOLDER" (3.12.6), or
+# export VIRTUAL_ENV=FOLDER with quotes only where a shell needs them (3.13.9 to 3.15.2).
+# uv 0.13.9 writes VIRTUAL_ENV='FOLDER'. Those are the ones looked at, in November 2026.
+_ACTIVATE_FOLDER = re.compile(r"^[ \t]*(?:export[ \t]+)?VIRTUAL_ENV=(.+)$", re.MULTILINE)
+
+
+def _same_folder(written: str, folder: Path) -> bool:
+    """Whether the folder an activate script wrote down is `folder`: itself, or another name for
+    it (a link, another spelling). A folder that is no longer there is not. When it can't be
+    told, the answer is yes."""
+    if written == str(folder):
+        return True
+    try:
+        return os.path.samefile(written, str(folder))
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def venv_was_moved(venv: Path) -> bool:
+    """True when a virtual environment's own activate script says it was made in another folder
+    than the one it is in now: that folder, or one above it, was renamed, moved or copied since.
+
+    Such an environment can't be turned on. Its bin/activate puts the folder it was made in on
+    the PATH, so `python` is then not found, or is some other Python, and this wizard would
+    call the environment "not turned on" every time. Python's guide says what to do
+    (Doc/library/venv.rst: "If you move an environment because you moved a parent directory of
+    it, you should recreate the environment in its new location"). Making it again without
+    --clear is not a repair to print: the commands installed in it, pip among them, go on
+    naming the old folder, and with another Python than it was made with it can end up unable
+    to start (seen on a Mac in November 2026: the first with each Python from 3.9 to 3.15, the
+    second with an environment made by 3.13 and made again by 3.12).
+
+    The script is read, never run. False when it is missing, when it names the folder it is in
+    (however that is quoted), or when it says nothing this function is sure of: a folder that
+    is worked out when the script runs, or one with a $ or a backquote in its name. So only an
+    environment's own word gets it made again. Not looked at on Windows, where this wizard and
+    the guide turn an environment on with Activate.ps1: that script works out where it is each
+    time it runs (read in the copies that come with Python 3.9, 3.12 and 3.13; not tried on
+    Windows).
+    """
+    if os.name == "nt":
+        return False
+    try:
+        script = (venv / "bin" / "activate").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    here = str(venv)
+    for spelling in (here, shlex.quote(here)):  # as it is (Python 3.12 and older), or quoted for a shell
+        if re.search(r"(?<![^\s=\"'(])" + re.escape(spelling) + r"(?![^\s\"');])", script):
+            return False
+    made_in = []
+    for value in _ACTIVATE_FOLDER.findall(script):
+        if "$" in value or "`" in value:
+            continue
+        try:
+            words = shlex.split(value)
+        except ValueError:
+            continue
+        if len(words) == 1:
+            made_in.append(words[0])
+    return bool(made_in) and not any(_same_folder(written, venv) for written in made_in)
+
+
+def python_situation() -> PythonSituation:
+    """This computer's PythonSituation."""
+    venv = Path(sys.prefix).resolve() if in_virtualenv() else None
+    dewey_venv = ROOT / ".venv"
+    in_dewey_venv = venv is not None and venv == dewey_venv.resolve()
+    try:
+        in_root = Path.cwd().resolve() == ROOT
+    except OSError:  # the terminal's folder no longer exists
+        in_root = False
+    # pyvenv.cfg marks a virtual environment. Without its Python (a leftover folder, or the Python
+    # it was made with has been uninstalled) "turn it on" would lead nowhere, and it has to be
+    # made again with --clear: without that, venv keeps the dead links already in the folder.
+    works = in_dewey_venv or (_is_there(dewey_venv / "pyvenv.cfg") and _is_there(venv_python()))
+    # Nor can it be turned on after the Dewey folder was renamed or moved. The environment this
+    # wizard is running in is not asked: its Python works, whatever its scripts say.
+    moved = works and not in_dewey_venv and venv_was_moved(dewey_venv)
+    works = works and not moved
+    return PythonSituation(
+        system="windows" if os.name == "nt" else ("mac" if sys.platform == "darwin" else "linux"),
+        root=str(ROOT), in_root=in_root, venv=str(venv) if venv else "", in_dewey_venv=in_dewey_venv,
+        dewey_venv_exists=works, dewey_venv_broken=not works and os.path.lexists(str(dewey_venv)),
+        dewey_venv_moved=moved)
+
+
+def _dotted(version) -> str:
+    return "%d.%d" % tuple(version[:2])
+
+
+def _typed(system: str, path: str) -> str:
+    """A path as it is typed in that system's shell: zsh or bash, or PowerShell on Windows."""
+    if system != "windows":
+        return shlex.quote(path)
+    return path if re.fullmatch(r"[\w:\\/.~-]+", path) else "'" + path.replace("'", "''") + "'"
+
+
+def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_first: bool = False,
+                      rerun: bool = True) -> List[str]:
+    """The lines for "make or turn on the virtual environment, then run this wizard again", for
+    the computer `where` describes and the Python `version` running the wizard (this computer
+    and this Python when not given). `rerun=False` leaves out the last step, running the wizard
+    again: for an environment that already has Dewey's packages and only has to be turned on.
+
+    When the Dewey folder has a working .venv and this Python is not in it: turn that on, and
+    make nothing again (not even when another project's environment is the one turned on).
+    Otherwise, outside any environment: make one, with --clear if a .venv folder is there but
+    is not a working environment. Inside one whose Python isn't one Dewey is tested with: make
+    it again, at its own path (inside one that is fine there is nothing to make or turn on),
+    unless the Dewey folder has a .venv folder of its own: then that is the one made again.
+    `cd` to the Dewey folder comes first when the terminal is somewhere else, or when `cd_first`
+    says the commands may be typed later, in another window: they are relative, and
+    `--clear .venv` in the wrong folder would empty another project's environment.
+
+    Lines that start with two spaces are commands, one per line, each under a line that says
+    what it does. The other lines do no harm if the whole block is pasted: they have no quotes,
+    ; # or other characters a shell acts on, and none starts with a word that is also a command
+    (a Mac's zsh runs `Make` as make). Only this system's commands are given (PowerShell's on
+    Windows).
+    """
+    where = where or python_situation()
+    windows = where.system == "windows"
+    running = tuple((version or sys.version_info)[:2])
+    # Name the Python that is running when Dewey is tested with it: it is on this computer, and
+    # on Ubuntu 24.04 it is 3.12, where python3.13 may not exist. Otherwise name the newest
+    # tested one. Which other Pythons are installed is not looked up.
+    tested = python_verdict(running) == "ok"
+    use = _dotted(running if tested else TESTED_PYTHON)
+    python = f"py -{use}" if windows else f"python{use}"
+    # An environment in another folder is made again only when the Dewey folder has no .venv folder
+    # of its own, working or not: nobody who left another project's environment turned on is sent
+    # to empty it while Dewey's own is the one that needs attention.
+    elsewhere = (bool(where.venv) and not where.in_dewey_venv and not where.dewey_venv_is_off
+                 and not where.dewey_venv_broken)
+    if not elsewhere:
+        folder = ".venv"
+        activate = ".venv\\Scripts\\Activate.ps1" if windows else "source .venv/bin/activate"
+    elif windows:
+        folder = _typed("windows", where.venv)
+        script = _typed("windows", where.venv.rstrip("\\/") + "\\Scripts\\Activate.ps1")
+        activate = ("& " if script.startswith("'") else "") + script  # PowerShell runs a quoted path with &
+    else:
+        folder = shlex.quote(where.venv)
+        activate = "source " + shlex.quote(where.venv.rstrip("/") + "/bin/activate")
+
+    lines: List[str] = []
+    if cd_first or not where.in_root:
+        lines += ["First, go to the Dewey folder:", "  cd " + _typed(where.system, where.root)]
+    if where.dewey_venv_is_off:
+        lines += ["Turn the virtual environment on:", f"  {activate}"]
+    elif not (where.venv and tested):
+        if where.system == "linux" and not tested:
+            lines.append(f"Any of Python {_dotted(MIN_PYTHON)} to {_dotted(TESTED_PYTHON)} works: type its number "
+                         f"in place of {use} in the next command.")
+        if not where.venv and not where.dewey_venv_broken:
+            lines += [f"Create a virtual environment for Dewey, the .venv folder, with Python {use}:",
+                      f"  {python} -m venv .venv"]
+        else:
+            what, inside = ("that", "its folder") if elsewhere else ("the", ".venv")
+            lines += [f"Create {what} virtual environment again with Python {use}. "
+                      f"This deletes what is in {inside} first:",
+                      f"  {python} -m venv --clear {folder}"]
+        lines += ["Turn it on:", f"  {activate}"]
+        if where.system == "linux":  # a new environment's pip there is older than the guide asks for
+            lines.append("Update pip before the last command: step 4 of Create a virtual environment in "
+                         "docs/INSTALL.md.")
+    return lines + (["Start this wizard again:", "  python install.py"] if rerun else [])
+
+
+def python_reason(verdict: str, version) -> List[str]:
+    """The first lines of the version check: what Dewey needs, and what this Python is."""
+    this = ".".join(str(n) for n in tuple(version)[:3])
+    span = f"{_dotted(MIN_PYTHON)} to {_dotted(TESTED_PYTHON)}"
+    if verdict == "old":
+        return [f"Dewey needs Python {span}; this is {this}, which is too old."]
+    if verdict == "new":
+        return [f"Dewey needs Python {span}; this is {this}, which is too new.",
+                f"Some of the packages Dewey installs can't be installed on Python {_dotted(version)} yet."]
+    return [f"Dewey is tested with Python {span}; this is {this}.",
+            f"On Python {_dotted(version)}, some packages may have to be built on your computer, which needs a "
+            "C compiler.",
+            f"Python {_dotted(TESTED_PYTHON)} is the safest choice. To switch, press Control+C and see "
+            "Troubleshooting in docs/INSTALL.md."]
+
+
+# Printed under steps that turn on a .venv this wizard takes to be a working one. It cannot see
+# everything that stops one from being turned on (on Windows, for one, an environment keeps its
+# own python.exe after the Python it was made with is uninstalled; not tried there), and without
+# these lines it would only ever say "not turned on" again. Plain words, like the steps: they
+# come after commands.
+IF_TURNING_ON_FAILS = ["If that says python is not found, or you see this message again, make the environment again:",
+                       "Recreate the virtual environment, under Troubleshooting in docs/INSTALL.md."]
+
+
+def remake_reason(where: PythonSituation) -> List[str]:
+    """Why the Dewey folder's .venv has to be made again, for a .venv that is not a working
+    virtual environment. Printed above the commands, so it may use any punctuation."""
+    if where.dewey_venv_moved:
+        return ["The Dewey folder has a virtual environment (the .venv folder), but it was made before the",
+                "Dewey folder was renamed or moved, and it does not work from the new place. It has to be made",
+                "again. That removes the packages in it: this wizard installs them again when you run it there."]
+    return ["The Dewey folder has a .venv folder, but it is not a working virtual environment,",
+            "so it has to be made again."]
+
+
+def switch_python_lines(where: PythonSituation, version=None) -> List[str]:
+    """What to do about a Python that can't run Dewey, by where that Python lives. The commands
+    come from environment_steps(), and the lines follow its conventions."""
+    best = _dotted(TESTED_PYTHON)
+    windows = where.system == "windows"
+    if where.dewey_venv_is_off:
+        # Checked first, whatever is wrong with the version: most likely the environment just
+        # isn't turned on, and nobody whose .venv is fine should be told to delete it (or to
+        # empty another project's environment that happens to be on). If the .venv's own Python
+        # is wrong too, the next run is inside it and says so.
+        return (["This is not the Python in Dewey's virtual environment (the .venv folder): the environment is",
+                 "not turned on in this terminal window. "
+                 + ("In PowerShell, run these one at a time:" if windows else "Run these one at a time:")]
+                + environment_steps(where, version)
+                + IF_TURNING_ON_FAILS)
+    lines: List[str] = []
+    if where.in_dewey_venv:
+        lines += ["This Python is the one in Dewey's virtual environment (the .venv folder), so installing another",
+                  "Python is not enough: the environment has to be made again with it.", ""]
+    elif where.dewey_venv_broken:
+        # Before the next case: with another project's environment turned on as well, the one to
+        # make again is still Dewey's own, and environment_steps() gives the commands for it.
+        lines += remake_reason(where) + [""]
+    elif where.venv:
+        lines += ["This Python belongs to a virtual environment in",
+                  f"  {where.venv}",
+                  "so installing another Python is not enough: that environment has to be made again with it.", ""]
+    if where.system == "linux":
+        lines += [f"If no Python from {_dotted(MIN_PYTHON)} to {best} is installed yet, install one first with your "
+                  "package manager:",
+                  "docs/INSTALL.md has the commands (Get your Linux computer ready, step 3)."]
+    else:
+        installer = "Windows installer (64-bit)" if windows else "macOS installer"
+        lines += [f"If Python {best} is not installed yet, install it first, with the {installer} from",
+                  f"  {LINKS['python']}",
+                  "Not the main Download button on python.org, which may give a newer Python that Dewey cannot use."]
+    lines += ["", "Then, in PowerShell, run these one at a time:" if windows else "Then run these one at a time:"]
+    # cd_first: after installing Python, people often carry on in a new window, which starts elsewhere.
+    lines += environment_steps(where, version, cd_first=True)
+    lines.append("For more help: Recreate the virtual environment, under Troubleshooting in docs/INSTALL.md."
+                 if where.venv or where.dewey_venv_broken
+                 else "For more help: Create a virtual environment, in docs/INSTALL.md.")
+    return lines
+
+
+def python_check_lines(version, where: PythonSituation) -> List[str]:
+    """Everything the version check prints about a Python that Dewey isn't tested with."""
+    verdict = python_verdict(version)
+    if verdict == "ok":
+        return []
+    lines = python_reason(verdict, version)
+    if verdict != "untested":
+        return lines + [""] + switch_python_lines(where, version)
+    if where.dewey_venv_is_off:
+        lines += ["",
+                  "This is also not the Python in Dewey's virtual environment (the .venv folder): the environment is",
+                  "not turned on in this terminal window. To use it, press Control+C, then "
+                  + ("in PowerShell " if where.system == "windows" else "") + "run these one at a time:"]
+        lines += environment_steps(where, version)
+        lines.append(f"Otherwise this wizard carries on with Python {_dotted(version)}.")
+    return lines
+
+
+def say_lines(lines) -> None:
+    """Print lines built by the functions above. Commands, links and folders stand out."""
+    for line in lines:
+        say(paint(line, BRAND) if line.startswith("  ") else line)
+
+
+def check_python(version=None, where: Optional[PythonSituation] = None) -> bool:
+    """Before the first question, say what is wrong with this Python, if anything. False means
+    stop: Dewey's packages can't be installed on it (too old, or too new for the pinned ones).
+
+    A Python newer than CI tests, but which the pins accept, gets a note and carries on.
+    """
+    version = tuple(version or sys.version_info)
+    verdict = python_verdict(version)
+    if verdict == "ok":
+        return True
+    say()
+    say_lines(python_check_lines(version, where or python_situation()))
+    return verdict == "untested"
+
+
 # ---------------------------------------------------------------- questions
 
 def ask_stack(cur: dict) -> str:
     heading("1. Which stack?")
-    return choose(
-        "Dewey can run on three stacks:",
-        [
-            ("anthropic", "Claude writes the answers; your archive lives in Postgres. Needs an "
-                          "Anthropic account (paid API). Search models can be hosted (Voyage AI) "
-                          "or open source on this machine - you choose next."),
-            ("open", "Everything open source on hardware you control: a local chat model "
-                     "(via Ollama), local search models, Postgres. No accounts or API keys."),
-            ("azure", "The original setup: Azure OpenAI + Azure AI Search + Blob Storage. "
-                      "Needs an Azure subscription with those services."),
-        ],
-        default=cur.get("DEWEY_STACK") or "anthropic",
-    )
+    options = [
+        ("anthropic", "Claude writes the answers; your archive lives in Postgres. Needs an "
+                      "Anthropic account (paid API). Search models can be hosted (Voyage AI) "
+                      "or open source on this machine - you choose next."),
+        ("open", "Everything open source on hardware you control: a local chat model "
+                 "(via Ollama), local search models, Postgres. No accounts or API keys."),
+        ("azure", "The original setup: Azure OpenAI + Azure AI Search + Blob Storage. "
+                  "Needs an Azure subscription with those services."),
+    ]
+    # The starting point is only where the list begins. It is not what Dewey runs when DEWEY_STACK
+    # is missing (that is azure, in app/providers/__init__.py), and the wizard always writes it.
+    default, mark = saved_or_suggested(cur, "DEWEY_STACK", options, "anthropic")
+    return choose("Dewey can run on three stacks:", options, default, mark)
 
 
 def ask_newsroom(cur: dict) -> dict:
@@ -385,24 +762,21 @@ def ask_retrieval(stack: str, cur: dict) -> dict:
     say("separate from the chat model: you can mix them, e.g. Claude for answers with")
     say("open-source search models, which needs no Voyage account.")
     default_embed = "voyage" if stack == "anthropic" else "local"
-    embed = choose(
-        "Where should embeddings (the vectors that power semantic search) be computed?",
-        [
-            ("voyage", "Voyage AI's hosted API (voyage-4). Needs a Voyage key; billed per token."),
-            ("local", "voyage-4-nano on this machine. Open-weight (Apache 2.0), no key; "
-                      "needs PyTorch and is slower on CPU."),
-        ],
-        default=cur.get("EMBEDDING_PROVIDER") or default_embed,
-    )
-    rerank = choose(
-        "Where should results be reranked?",
-        [
-            ("voyage", "Voyage AI's hosted rerank-3. Needs a Voyage key."),
-            ("local", "bge-reranker-v2-m3 on this machine. Open-weight (Apache 2.0), no key."),
-            ("none", "Skip reranking; use the hybrid search order. Fastest, likely less precise."),
-        ],
-        default=cur.get("RERANK_PROVIDER") or default_embed,
-    )
+    embed_options = [
+        ("voyage", "Voyage AI's hosted API (voyage-4). Needs a Voyage key; billed per token."),
+        ("local", "voyage-4-nano on this machine. Open-weight (Apache 2.0), no key; "
+                  "needs PyTorch and is slower on CPU."),
+    ]
+    default, mark = saved_or_suggested(cur, "EMBEDDING_PROVIDER", embed_options, default_embed)
+    embed = choose("Where should embeddings (the vectors that power semantic search) be computed?",
+                   embed_options, default, mark)
+    rerank_options = [
+        ("voyage", "Voyage AI's hosted rerank-3. Needs a Voyage key."),
+        ("local", "bge-reranker-v2-m3 on this machine. Open-weight (Apache 2.0), no key."),
+        ("none", "Skip reranking; use the hybrid search order. Fastest, likely less precise."),
+    ]
+    default, mark = saved_or_suggested(cur, "RERANK_PROVIDER", rerank_options, default_embed)
+    rerank = choose("Where should results be reranked?", rerank_options, default, mark)
     say("Note: once you index your archive, the embedding choice is fixed for that database.")
     return {"EMBEDDING_PROVIDER": embed, "RERANK_PROVIDER": rerank}
 
@@ -445,34 +819,330 @@ def ask_open_llm(cur: dict, interactive: bool) -> dict:
     return out
 
 
-def offer_pgvector_container() -> dict:
-    """Print a ready-to-run pgvector container command; return the .env values for it.
+# ------------------------------------------------- the Docker database (dewey-db)
 
-    Returns {} if the user hasn't started it, so the caller can fall back to the
-    list of options. The password is generated rather than hard-coded and the port
-    is published on loopback only, because docker-compose.yml takes the same care
-    and a suggestion that contradicts it teaches the wrong habit.
+def docker_database_url(password: str) -> str:
+    """The address of the database that the wizard's docker run command creates."""
+    return f"postgresql://dewey:{password}@127.0.0.1:5432/dewey"
+
+
+# That address with a password of letters and digits: the only kind that can go unquoted into a
+# shell command and unencoded into a URL.
+_DOCKER_DATABASE_URL = re.compile(r"postgresql://dewey:([A-Za-z0-9]+)@127\.0\.0\.1:5432/dewey")
+
+
+def saved_docker_password(cur: dict) -> tuple:
+    """(password, the .env setting it is in) for the Docker database, or ("", "") when .env has
+    none this wizard can use.
+
+    The password inside a saved DATABASE_URL for that database comes first, because it is what
+    Dewey connects with. POSTGRES_PASSWORD comes second: Docker Compose's own database reads that
+    line too, and the two can differ. Either is evidence, not proof: the docs show people how to
+    type the same address by hand, for databases this wizard never made.
     """
-    password = secrets.token_hex(12)  # 24 characters, letters and digits only
-    say()
-    say("  Run this in another terminal, then come back:")
-    say()
-    say(paint(f"    docker run -d --name {PGVECTOR_CONTAINER} \\", BRAND))
-    say(paint("      -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey \\", BRAND))
-    say(paint(f"      -e POSTGRES_PASSWORD={password} \\", BRAND))
-    say(paint(f"      -p 127.0.0.1:5432:5432 {PGVECTOR_DOCKER_IMAGE}", BRAND))
-    say()
-    say("  That publishes the port on 127.0.0.1 only, so nothing else on your network")
-    say("  can reach it. The password above is generated for you and is written to .env")
-    say("  as POSTGRES_PASSWORD, which docker-compose.yml also needs.")
-    if not ask_yes("  Is it running?", default=True):
-        say("  No problem: start it whenever you like, then re-run this wizard.")
-        return {}
-    return {"DATABASE_URL": f"postgresql://dewey:{password}@127.0.0.1:5432/dewey",
-            "POSTGRES_PASSWORD": password}
+    match = _DOCKER_DATABASE_URL.fullmatch(cur.get("DATABASE_URL", "").strip())
+    if match:
+        return match.group(1), "DATABASE_URL"
+    password = cur.get("POSTGRES_PASSWORD", "").strip()
+    if re.fullmatch(r"[A-Za-z0-9]+", password):
+        return password, "POSTGRES_PASSWORD"
+    return "", ""
 
 
-def ask_postgres(cur: dict, interactive: bool) -> dict:
+def pgvector_run_command(password: str) -> List[str]:
+    """The docker run command that creates the database, as the lines to print.
+
+    docs/INSTALL.md gives the same command on one line, for PowerShell; a test compares the two.
+    """
+    return [
+        f"docker run -d --name {PGVECTOR_CONTAINER} --restart unless-stopped \\",
+        "  -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey \\",
+        f"  -e POSTGRES_PASSWORD={password} \\",
+        f"  -v {PGVECTOR_VOLUME}:{PGVECTOR_MOUNT} \\",
+        f"  -p 127.0.0.1:5432:5432 {PGVECTOR_DOCKER_IMAGE}",
+    ]
+
+
+def say_command(*lines: str) -> None:
+    """A command for the person to copy: set apart, in the accent colour, with nothing else on its lines."""
+    say()
+    for line in lines:
+        say(paint("    " + line, BRAND))
+    say()
+
+
+@dataclass
+class DockerLook:
+    """What Docker shows of the wizard's database."""
+    container: str             # "absent", "unknown" (Docker didn't answer), or Docker's word for its state
+    volume: bool = False       # a volume named dewey-db-data exists
+    uses_volume: bool = False  # the container mounts it; one made by the earlier command doesn't
+
+
+def docker_answer(*args: str) -> Optional[str]:
+    """What `docker ARGS` prints, or None when Docker gives no answer: not installed, not running,
+    not allowed for this account, or too slow. Only for commands that list things.
+
+    Only the exit status says whether it answered (the wording of Docker's errors changes between
+    versions), and stdin is closed so that docker can't read the answers typed for the wizard.
+    """
+    try:
+        done = subprocess.run(["docker", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace",
+                              timeout=DOCKER_LOOK_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def look_at_docker() -> DockerLook:
+    """Ask Docker whether the container dewey-db and the volume dewey-db-data exist.
+
+    Two commands that only list things. Never `docker inspect`: it prints the container's
+    environment, the database password included. `--filter name=` matches every name that
+    contains the text (dewey-db-old too), so the names are compared here.
+    """
+    listed = docker_answer("ps", "-a", "--no-trunc", "--filter", f"name={PGVECTOR_CONTAINER}",
+                           "--format", "{{.Names}} {{.State}} {{.Mounts}}")
+    if listed is None:
+        return DockerLook("unknown")
+    volumes = docker_answer("volume", "ls", "--filter", f"name={PGVECTOR_VOLUME}", "--format", "{{.Name}}")
+    if volumes is None:
+        return DockerLook("unknown")
+    look = DockerLook("absent", volume=PGVECTOR_VOLUME in volumes.split())
+    for line in listed.splitlines():
+        names, state, mounts = (line.split(None, 2) + ["", "", ""])[:3]
+        if PGVECTOR_CONTAINER in names.split(","):
+            look.container = re.sub(r"[^\w-]", "", state) or "not reported"
+            look.uses_volume = PGVECTOR_VOLUME in mounts.split(",")
+    return look
+
+
+def find_docker_database() -> DockerLook:
+    """look_at_docker(), announced, with one offer to look again when Docker doesn't answer: the
+    usual reason is that Docker Desktop or Colima hasn't been started yet."""
+    say("  Asking Docker whether a container named dewey-db already exists...")
+    look = look_at_docker()
+    if look.container != "unknown":
+        return look
+    say("  Docker didn't answer: it may not be running, or this account may need sudo for it.")
+    if ask_yes("  Start Docker, then look again?", default=True):
+        look = look_at_docker()
+        if look.container == "unknown":
+            say("  Docker still didn't answer.")
+    return look
+
+
+def _say_saved_password(lead: str, cur: dict, password: str, source: str, proof: bool = False) -> None:
+    """Say which saved password is in use. It is evidence of the database's password, not proof,
+    unless (proof) the command about to be printed creates the database with it."""
+    other = cur.get("POSTGRES_PASSWORD", "").strip()
+    if source == "POSTGRES_PASSWORD":
+        say(f"  {lead}: the POSTGRES_PASSWORD line.")
+        if not proof:
+            say("  If this wizard's check later reports that password authentication failed, see")
+            say('  "The database password doesn\'t match" in docs/INSTALL.md.')
+    elif other and other != password:
+        say(f"  {lead}: the one inside DATABASE_URL, not the")
+        say("  POSTGRES_PASSWORD line, which is different.")
+    else:
+        say(f"  {lead}: the one inside DATABASE_URL.")
+
+
+def _say_address_change(saved_url: str, url: str) -> None:
+    if saved_url and saved_url != url:
+        say("  .env's DATABASE_URL held a different address: it changes to this database's.")
+        say("  The old one stays in the .env.bak- file this wizard makes when it writes .env.")
+
+
+def offer_pgvector_container(cur: Optional[dict] = None, look: Optional[DockerLook] = None,
+                             dry_run: bool = False) -> Optional[dict]:
+    """The Docker choice: print what the person should run, and return the .env values for it.
+
+    This only prints commands. It never creates, starts, stops or removes anything, and it never
+    prints a command that deletes data: those are in docs/INSTALL.md, after their warnings.
+
+    A database keeps the password it was created with, so a new password is right only for a
+    database that doesn't exist yet. Hence the look at Docker first, and these rules:
+      - no container and no volume: the docker run command, with the saved password or a new one;
+      - a container, or its volume alone, and a saved password: that password, never a new one;
+      - the volume alone and no saved password: no command, and .env stays as it is;
+      - a container and no saved password: None, and the caller asks for the address instead;
+      - no answer from Docker: the command, but a new password is kept only after a yes.
+    POSTGRES_PASSWORD is returned only for a password made here, and never when .env already has
+    one: Docker Compose's own database reads that line too. A "no" returns the saved DATABASE_URL,
+    so that it isn't dropped from .env. Under --dry-run nothing is asked of Docker, and no
+    password is made or shown. `look` lets tests hand in Docker's answer.
+    """
+    cur = cur or {}
+    saved_url = cur.get("DATABASE_URL", "")
+    password, source = saved_docker_password(cur)
+    start = f"docker start {PGVECTOR_CONTAINER}"
+    say()
+    if dry_run:
+        say("  (--dry-run: a real run first asks Docker whether a database named dewey-db already exists.")
+        say("  If there is none yet, it prints this command, with a password in place of PASSWORD.)")
+        say_command(*pgvector_run_command("PASSWORD"))
+        say("  This dry run asks Docker nothing, makes no password and saves nothing about the database.")
+        if not saved_url:
+            say("  So the Summary below lists DATABASE_URL as still missing: a real run saves it once the")
+            say("  database is running.")
+        return {"DATABASE_URL": saved_url}
+    if look is None:
+        look = find_docker_database()
+    state = look.container
+    seen = state != "unknown"                    # Docker answered
+    exists = state not in ("absent", "unknown")  # and showed a container named dewey-db
+    running = state == "running"
+
+    if exists and not password:
+        say("  Docker already has a container named dewey-db, but .env has no saved password this wizard")
+        say("  can use for it, so it can't write the database's address. A new password wouldn't work:")
+        say("  a database keeps the password it was created with.")
+        if not running:
+            say(f"  The container isn't running: Docker reports it as \"{state}\".")
+        if not look.uses_volume:
+            # Said on this path too, not only under "About this database" below: docs/INSTALL.md
+            # tells people these are the words for an older container. No command here, only text.
+            say("  The container doesn't use the volume dewey-db-data, so it was made by an earlier version")
+            say('  of this wizard or by hand. "An older dewey-db" in docs/INSTALL.md explains what that')
+            say("  means for restarts and for its data.")
+        say("   - If you know the database's address, type it at the next prompt. For a database this")
+        say("     wizard helped make, it is this line, with the password in place of PASSWORD:")
+        say("         " + docker_database_url("PASSWORD"))
+        if saved_url:
+            say("   - If you don't, press Enter at the next prompt: the address already saved in .env stays.")
+        else:
+            say("   - If you don't, press Enter at the next prompt.")
+        say('     "The database container already exists" in docs/INSTALL.md shows how to find the')
+        say("     password, or how to set a new one and keep what is in the database.")
+        return None
+    if state == "absent" and look.volume and not password:
+        say("  Docker has no container named dewey-db, but it still has the volume dewey-db-data: the")
+        say("  files of an earlier Docker database. A new container would use those files, and they keep")
+        say("  the password they were created with. .env has no saved password this wizard can use")
+        say("  for them, so it prints no command: a new password wouldn't fit.")
+        say('  "The database container already exists" in docs/INSTALL.md shows how to find the old')
+        say("  password, or how to keep the files and set a new one. Then run this wizard again.")
+        if saved_url:
+            say("  The address already saved in .env stays as it is.")
+        else:
+            say("  Until then Dewey has no database: it can't index your archive or answer questions.")
+        return {"DATABASE_URL": saved_url}
+
+    made_here = not password
+    if made_here:
+        password = secrets.token_hex(12)  # 24 characters, letters and digits only
+    url = docker_database_url(password)
+    # May this run write POSTGRES_PASSWORD? Only for a password it made, and only if .env has none.
+    may_save = made_here and not cur.get("POSTGRES_PASSWORD", "").strip()
+
+    def values(connected: bool, keep_password: bool) -> dict:
+        out = {"DATABASE_URL": url if connected else saved_url}
+        if keep_password:
+            out["POSTGRES_PASSWORD"] = password
+        return out
+
+    if running:
+        say("  Docker already has a container named dewey-db, and it is running: nothing to start.")
+        _say_saved_password("This wizard uses the database password saved in .env", cur, password, source)
+        _say_address_change(saved_url, url)
+    elif exists:
+        say("  Docker already has a container named dewey-db, but it isn't running (Docker reports it")
+        say(f"  as \"{state}\"). What was indexed in it is still there. Run this in another terminal,")
+        say("  then come back:")
+        say_command(start)
+        _say_saved_password("This wizard uses the database password saved in .env", cur, password, source)
+    else:
+        if not seen:
+            say("  This wizard couldn't see whether dewey-db already exists. If it doesn't, the command")
+            say("  below creates it.")
+        elif look.volume:
+            say("  Docker has no container named dewey-db, but it still has this database's files (the")
+            say("  volume dewey-db-data). The command below makes a new container that uses them, so what")
+            say("  was indexed is still there.")
+        if not made_here:
+            # Only when Docker showed that nothing exists is the command sure to create the
+            # database, and so to give it this password.
+            _say_saved_password("The command below shows the database password saved in .env", cur, password,
+                                source, proof=seen and not look.volume)
+        if seen:
+            say("  Run this in another terminal, then come back:")
+        else:
+            say("  Run this in another terminal (start Docker first if needed), then come back:")
+        say_command(*pgvector_run_command(password))
+        if not seen and made_here:
+            say("  If Docker answers that the name dewey-db is already in use, a database already exists,")
+            say("  and this new password won't fit it. Don't remove anything: answer n below, and see")
+            say('  "The database container already exists" in docs/INSTALL.md.')
+        elif not seen:
+            say("  If Docker answers that the name dewey-db is already in use, the database exists already.")
+            say("  Start it instead:")
+            say_command(start)
+
+    say("  About this database:")
+    if not exists:
+        say("   - Only this computer can reach it: its port is published on 127.0.0.1.")
+        if made_here and not may_save:
+            say("   - The password above was made for you. .env already has a POSTGRES_PASSWORD, which this")
+            say("     wizard can't use here (it isn't only letters and digits) and leaves as it is. So the")
+            say("     new password is saved only inside DATABASE_URL, and only if you answer y below.")
+        elif made_here and seen:
+            say("   - The password above was made for you. This wizard will save it in .env (as")
+            say("     POSTGRES_PASSWORD) with your other answers, and use it again if you re-run it.")
+        elif made_here:
+            say("   - The password above was made for you. This wizard will save it in .env (as")
+            say("     POSTGRES_PASSWORD) with your other answers, but only if you answer y below.")
+        say("   - Its data is kept in a Docker volume named dewey-db-data, which stays if the container")
+        say("     is removed.")
+        say("   - It starts again when Docker starts, unless you stopped it yourself. If it is ever")
+        say("     stopped, start Docker, then run:")
+        say("         " + start)
+    else:
+        if look.uses_volume:
+            say("   - A database made with this wizard's command starts again when Docker starts, unless")
+            say("     you stopped it yourself.")
+        else:
+            say("   - It doesn't use the volume dewey-db-data, so it was made by an earlier version of this")
+            say("     wizard or by hand. It may stay stopped after a restart. This makes it start when")
+            say("     Docker starts:")
+            say(f"         docker update --restart unless-stopped {PGVECTOR_CONTAINER}")
+            say('     "An older dewey-db" in docs/INSTALL.md explains the rest.')
+        if running:
+            say("   - If it is ever stopped, start Docker, then run:")
+            say("         " + start)
+        else:
+            say("   - If it is ever stopped again, start Docker, then use the docker start command above.")
+    say("   - It is separate from the db service in docker-compose.yml: another database with its")
+    say("     own data. An archive indexed in one isn't in the other.")
+
+    if running:
+        return values(True, keep_password=False)
+    # Yes is the suggested answer only when Docker was seen: unseen, an older dewey-db may hold the name.
+    if ask_yes("  Is it running?", default=seen):
+        _say_address_change(saved_url, url)
+        return values(True, keep_password=may_save)
+    # A new password is worth keeping only if the command is sure to create a database with it:
+    # Docker showed that nothing exists. Kept after "Docker didn't answer", it would be taken for
+    # the password of whatever dewey-db the next run finds.
+    keep_password = may_save and seen
+    if saved_url == url:
+        say("  No problem: .env already has this database's address, and it stays as it is.")
+        say("  Start the database whenever you like.")
+    elif keep_password or not made_here:
+        say("  No problem: start it whenever you like, then re-run this wizard and choose docker again.")
+        say("  It then prints the same command, or finds the database if you started it meanwhile.")
+    else:
+        say("  No problem. The password above isn't saved, so don't use that command later: re-run")
+        say("  this wizard when you are ready, and use the command it prints then.")
+    if not saved_url:
+        say("  Until then Dewey has no database: it can't index your archive or answer questions.")
+    elif saved_url != url:
+        say("  The address already saved in .env stays as it is.")
+    return values(False, keep_password=keep_password)
+
+
+def ask_postgres(cur: dict, interactive: bool, dry_run: bool = False) -> dict:
     heading("Postgres with pgvector (where your archive is stored and searched)")
     say("Dewey keeps your archive in a Postgres database with the pgvector extension")
     say("installed. It can run on this machine, or anywhere you can reach from it.")
@@ -486,10 +1156,10 @@ def ask_postgres(cur: dict, interactive: bool) -> dict:
     answer = choose("Do you have a Postgres database for Dewey?", options, default, mark="suggested")
 
     if answer == "docker":
-        started = offer_pgvector_container()
-        if started:
-            return started
-        answer = "later"
+        values = offer_pgvector_container(cur, dry_run=dry_run)
+        if values is not None:
+            return values
+        answer = "yes"  # a dewey-db this wizard has no password for: whoever made it may know its address
 
     if answer == "later":
         say()
@@ -560,27 +1230,175 @@ def needs_local_models(values: dict) -> bool:
         values.get("EMBEDDING_PROVIDER"), values.get("RERANK_PROVIDER"))
 
 
+# ------------------------------------------ does a Python have Dewey's packages?
+#
+# Before it starts the indexer, and when it prints the MCP example, the wizard checks that the
+# Python in question can find what Dewey's code imports. These are import names, not package
+# names (python-dotenv is "dotenv"), and deliberately few: enough to tell whether
+# requirements.txt was installed in that Python, not a copy of it.
+# tests/install/test_packages.py checks that each is imported somewhere under app/, and is
+# found where requirements.txt is installed.
+REQUIREMENTS, REQUIREMENTS_LOCAL = "requirements.txt", "requirements-local.txt"
+MODULES_EVERY_STACK = ("dotenv", "pydantic", "mcp")
+MODULES_POSTGRES = ("psycopg", "pgvector", "numpy")                 # the Postgres store
+MODULES_CHAT = {"anthropic": ("anthropic",), "open": ("openai",)}   # each Postgres stack's chat SDK
+MODULES_VOYAGE = ("voyageai",)                                      # when Voyage AI hosts a search model
+MODULES_AZURE = ("openai", "azure.core", "azure.search.documents", "azure.storage.blob")
+MODULES_LOCAL = ("torch", "sentence_transformers")                  # PyTorch and requirements-local.txt
+PROBE_TIMEOUT = 30  # seconds; an answer takes a few hundredths of one
+
+# What modules_missing() runs in a fresh copy of the Python it asks. It only looks names up:
+# nothing of Dewey's is imported (looking up a dotted name does import its parent package).
+# The current folder comes off the path first: started in the Dewey folder, Python would find
+# `data` and `docs` there as modules. A name counts only when something loadable is behind it,
+# because a leftover empty folder in site-packages is found too. An error while looking a name
+# up means that name is missing, not that the check failed. The last line says the probe got
+# to its end, so that an empty answer is never mistaken for "nothing is missing".
+_PROBE = """
+import importlib.util, sys
+if sys.path and sys.path[0] == "":
+    del sys.path[0]
+for name in sys.argv[1:]:
+    try:
+        spec = importlib.util.find_spec(name)
+        found = spec is not None and bool(spec.origin)
+    except Exception:
+        found = False
+    if not found:
+        print("missing " + name)
+print("checked " + str(len(sys.argv) - 1))
+"""
+
+
+def requirement_modules(values: dict) -> List[str]:
+    """The modules that stand for "requirements.txt is installed", for this setup's stack."""
+    modules = list(MODULES_EVERY_STACK)
+    stack = values.get("DEWEY_STACK")
+    if stack == "azure":
+        return modules + list(MODULES_AZURE)
+    modules += list(MODULES_POSTGRES) + list(MODULES_CHAT.get(stack, ()))
+    if "voyage" in (values.get("EMBEDDING_PROVIDER"), values.get("RERANK_PROVIDER")):
+        modules += list(MODULES_VOYAGE)
+    return modules
+
+
+def local_model_modules(values: dict, indexing: bool = False) -> List[str]:
+    """The modules of the local search models' packages, when this setup runs such a model.
+    The indexer embeds and never reranks, so with `indexing` they count only when the embedding
+    model is the local one; the MCP server needs them when either model is local."""
+    if indexing:
+        needed = needs_local_models(values) and values.get("EMBEDDING_PROVIDER") == "local"
+    else:
+        needed = needs_local_models(values)
+    return list(MODULES_LOCAL) if needed else []
+
+
+def modules_missing(modules, python: Optional[str] = None) -> Optional[List[str]]:
+    """Which of `modules` a Python can't find: the one running this wizard, or the one at the
+    path `python`. [] means it has them all. None means it could not be asked: it could not be
+    started, it crashed or it took too long.
+
+    A fresh copy of that Python answers, not this process, because that is how the indexer and
+    the MCP server will be started, because after this wizard's own pip run this process can
+    miss what a new one finds, and because it is the only way to ask another Python. It reads
+    nothing from the terminal, writes no files (-B) and changes nothing, so unlike run() it is
+    not shown as a "$" command.
+    """
+    modules = list(modules)
+    try:
+        done = subprocess.run([python or sys.executable, "-B", "-c", _PROBE] + modules, cwd=ROOT,
+                              stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=PROBE_TIMEOUT)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    lines = done.stdout.splitlines()
+    if done.returncode != 0 or f"checked {len(modules)}" not in lines:
+        return None
+    return [name for name in modules if f"missing {name}" in lines]
+
+
+def missing_packages(values: dict, python: Optional[str] = None, indexing: bool = False) -> Optional[List[str]]:
+    """What a Python still lacks for this setup, as the requirements files to install, in order:
+    [] when it has everything, None when it could not be asked. The Python is the one running
+    this wizard unless `python` gives another one's path. With `indexing`, only what the indexer
+    needs counts; otherwise everything the MCP server needs, which covers the indexer too."""
+    main, local = requirement_modules(values), local_model_modules(values, indexing)
+    absent = modules_missing(main + local, python)
+    if absent is None:
+        return None
+    return [name for name, modules in ((REQUIREMENTS, main), (REQUIREMENTS_LOCAL, local))
+            if set(modules) & set(absent)]
+
+
+def say_packages_state(values: dict, after_pip_error: bool = False) -> None:
+    """After an install that was skipped, or that failed: say plainly what the Python running
+    this wizard can do now. (An install that worked needs no comment.)"""
+    lacking = missing_packages(values)
+    this_python = paint(f"    {sys.executable}", BRAND)
+    if lacking is None:
+        say("  This wizard could not check whether this Python has Dewey's packages:")
+        say(this_python)
+        say("  Without them, the indexer, the MCP server and the demo page will not run with it.")
+    elif REQUIREMENTS in lacking:
+        say("  This Python does not have Dewey's packages yet:")
+        say(this_python)
+        say("  So the indexer, the MCP server and the demo page will not run with it.")
+    elif lacking:
+        fails = "indexing and searches" if values.get("EMBEDDING_PROVIDER") == "local" else "searches"
+        say("  This Python has Dewey's main packages, but not the ones for local search models")
+        say(f"  (PyTorch and {REQUIREMENTS_LOCAL}):")
+        say(this_python)
+        say(f"  So {fails} will fail with it.")
+    elif not after_pip_error:
+        say("  This Python already has Dewey's packages, so nothing needs installing.")
+    if after_pip_error:
+        say("  The packages may be only partly installed. To try again, run this wizard again.")
+        if python_verdict() != "ok":
+            say(f"  Dewey is not tested with Python {_dotted(sys.version_info)}. Python {_dotted(TESTED_PYTHON)} is "
+                "the safest choice: see Troubleshooting in docs/INSTALL.md.")
+    if lacking:
+        say('  "Next steps", at the end of this wizard, says what to do.')
+
+
 def install_dependencies(values: dict) -> None:
     heading("Install Python dependencies")
-    in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    if not in_venv:
-        say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
-        say("  python3.13 -m venv .venv && source .venv/bin/activate")
-        say("  (Windows: py -3.13 -m venv .venv, then .venv\\Scripts\\Activate.ps1)")
-        say("then re-run: python install.py")
+    if not in_virtualenv():
+        where = python_situation()
+        if where.dewey_venv_exists:
+            say("You're not in a virtual environment. The Dewey folder has one, the .venv folder, but it is")
+            say("not turned on in this terminal window. To turn it on and run this wizard in it:")
+        elif where.dewey_venv_moved:
+            say("You're not in a virtual environment. The Dewey folder has one, the .venv folder, but it was made")
+            say("before the Dewey folder was renamed or moved, and it does not work from the new place. To make it")
+            say("again and run this wizard in it, which installs the packages again:")
+        elif where.dewey_venv_broken:
+            say("You're not in a virtual environment. The Dewey folder has a .venv folder, but it is")
+            say("not a working virtual environment. To make it again and run this wizard in it:")
+        else:
+            say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
+        say_lines(environment_steps(where))
+        if where.dewey_venv_exists:
+            say_lines(IF_TURNING_ON_FAILS)
         if not ask_yes("Install into the current Python anyway?", default=False):
+            say_packages_state(values)
             return
     pip = [sys.executable, "-m", "pip", "install"]
     if not ask_yes("Install requirements.txt now?", default=True):
+        say_packages_state(values)
         return
-    if not run(pip + ["-r", "requirements.txt"]):
-        say("  pip failed; see the output above.")
-        return
-    if needs_local_models(values):
+    installed = run(pip + ["-r", REQUIREMENTS])
+    if installed and needs_local_models(values):
         say("Local models need PyTorch (a large download).")
-        if ask_yes("Does this machine lack an NVIDIA GPU? (installs the smaller CPU-only PyTorch)", default=True):
-            run(pip + ["torch", "--index-url", LINKS["pytorch_cpu"]])
-        run(pip + ["-r", "requirements-local.txt"])
+        cpu_only = ask_yes("Does this machine lack an NVIDIA GPU? (installs the smaller CPU-only PyTorch)",
+                           default=True)
+        # If the CPU-only PyTorch can't be installed, stop there: requirements-local.txt would
+        # fetch the full build in its place, against the answer just given.
+        installed = ((not cpu_only or run(pip + ["torch", "--index-url", LINKS["pytorch_cpu"]]))
+                     and run(pip + ["-r", REQUIREMENTS_LOCAL]))
+    if not installed:
+        # pip's own output says why (a refusal to install outside a virtual environment included).
+        say("  pip stopped with an error. Its own message, above, says why.")
+        say_packages_state(values, after_pip_error=True)
 
 
 def is_loopback(host: Optional[str]) -> bool:
@@ -634,20 +1452,81 @@ def http_get_json(url: str, headers=None, timeout: float = 5.0):
         return json.loads(resp.read().decode("utf-8"))
 
 
+# pgvector 0.8.0 added iterative index scans; without them, date and byline searches can miss
+# stories. MIN_PGVECTOR, pgvector_version() and pgvector_version_text() repeat the ones in
+# app/providers/pgvector_store.py, which this installer can't import before the dependencies are
+# installed. A test in tests/providers/test_pgvector_store.py keeps the two in step.
+MIN_PGVECTOR = (0, 8)
+PGVECTOR_UPDATE_SQL = "ALTER EXTENSION vector UPDATE;"
+# The numbers a version starts with: "0.6.0" in "0.6.0", "0.8" in "0.8beta". Only the digits 0-9,
+# at most nine to a number, so that nothing else of a version is ever printed.
+_PGVECTOR_NUMBERS = re.compile(r"\s*(([0-9]{1,9})(?:\.([0-9]{1,9}))?(?:\.[0-9]{1,9}){0,2})")
+
+
+def pgvector_version(text) -> Optional[tuple]:
+    """(major, minor) of a pgvector version such as "0.8.7" or "0.8", to compare as numbers
+    (0.10 is newer than 0.8). None when `text` isn't text that starts with a number."""
+    match = _PGVECTOR_NUMBERS.match(text) if isinstance(text, str) else None
+    return (int(match.group(2)), int(match.group(3) or 0)) if match else None
+
+
+def pgvector_version_text(text) -> Optional[str]:
+    """The part of a version that the wizard prints: the numbers it starts with ("0.6.0"), never
+    anything else the database reports. None when pgvector_version() is."""
+    match = _PGVECTOR_NUMBERS.match(text) if isinstance(text, str) else None
+    return match.group(1) if match else None
+
+
+def pgvector_status(default_version, installed_version) -> str:
+    """The Postgres result of the service check, for a server that has pgvector.
+
+    Judges the version Dewey will get: the one in the database the URL names (installed_version,
+    which is the extversion Dewey reads at every search) or, where CREATE EXTENSION hasn't run
+    yet, the one the server would give it (default_version). Older than 0.8, or unreadable, is
+    flagged with what to do about it: a result to read, never a reason to stop the wizard.
+    The lines under the result say only what the check knows. It can't compare a version it
+    can't read with the server's, so it never calls that one behind the server's: such a
+    version gets both steps, or the step that comes before indexing.
+    Lines after the first are indented to sit under it in the list of results.
+    """
+    in_database = installed_version is not None
+    judged = installed_version if in_database else default_version
+    version, shown = pgvector_version(judged), pgvector_version_text(judged)
+    if version is not None and version >= MIN_PGVECTOR:
+        return f"ok, pgvector {shown} available"
+    if version is None:
+        found = "pgvector's version can't be read, so Dewey treats it as older than 0.8"
+    else:
+        found = f"pgvector {shown} is older than 0.8"
+    lines = [f"connected, but {found}: date and byline searches can miss stories"]
+    on_server = pgvector_version(default_version)
+    if not in_database:
+        # Nothing in this database to update yet, so no ALTER EXTENSION. "that" is the version
+        # the first line names, so it is said only when the first line names one.
+        which = "; that is the version the server would give it." if version is not None else "."
+        lines += [f"pgvector isn't turned on in this database yet{which}",
+                  "Install pgvector 0.8 or newer on the database server before you index."]
+    elif version is not None and on_server is not None and on_server >= MIN_PGVECTOR:
+        # Only of a version the check could read: one it can't read may not be behind the server's.
+        lines += [f"The database server already has pgvector {pgvector_version_text(default_version)}, "
+                  "but this database hasn't been",
+                  "updated to it. To fix it, run this in Dewey's database as a Postgres superuser:",
+                  f"    {PGVECTOR_UPDATE_SQL}"]
+    else:
+        lines += ["To fix it, install pgvector 0.8 or newer on the database server, then run this in",
+                  "Dewey's database as a Postgres superuser:",
+                  f"    {PGVECTOR_UPDATE_SQL}"]
+    lines.append("Step by step: 'Upgrade pgvector' in docs/STACKS.md.")
+    return "\n      ".join(lines)
+
+
 def check_services(values: dict) -> None:
     heading("Check credentials and services")
     stack = values["DEWEY_STACK"]
     results = []
 
-    if stack == "anthropic" and values.get("ANTHROPIC_API_KEY"):
-        try:
-            import anthropic
-            anthropic.Anthropic(api_key=values["ANTHROPIC_API_KEY"]).models.list(limit=1)
-            results.append(("Anthropic API key", "ok"))
-        except ImportError:
-            results.append(("Anthropic API key", "skipped (install requirements first)"))
-        except Exception as e:
-            results.append(("Anthropic API key", f"FAILED: {type(e).__name__}: {e}"))
+    if stack == "anthropic":
+        results.append(check_claude(values))
 
     if stack == "open":
         base = (values.get("OPEN_LLM_BASE_URL") or OLLAMA_DEFAULT_URL).rstrip("/")
@@ -673,9 +1552,9 @@ def check_services(values: dict) -> None:
         try:
             import psycopg
             with psycopg.connect(values["DATABASE_URL"], connect_timeout=5) as conn:
-                row = conn.execute(
-                    "SELECT default_version FROM pg_available_extensions WHERE name = 'vector'").fetchone()
-            results.append(("Postgres", f"ok, pgvector {row[0]} available" if row else
+                row = conn.execute("SELECT default_version, installed_version FROM pg_available_extensions "
+                                   "WHERE name = 'vector'").fetchone()
+            results.append(("Postgres", pgvector_status(row[0], row[1]) if row else
                             "connected, but the pgvector extension is NOT installed on this server"))
         except ImportError:
             results.append(("Postgres", "skipped (install requirements first)"))
@@ -838,17 +1717,81 @@ def report_import_review(docs: List[dict], plan: Optional["ImportPlan"] = None) 
     return not any(f.stop for f in findings)
 
 
-def index_archive(values: dict) -> None:
+def index_script(values: dict) -> str:
+    """The script that indexes the articles in data/ on this setup's stack."""
+    return "app/setup.py" if values.get("DEWEY_STACK") == "azure" else "app/setup_postgres.py"
+
+
+def index_reason(values: dict) -> str:
+    """Why indexing does not start when Enter is pressed, in one sentence for this setup."""
+    if values.get("DEWEY_STACK") == "azure":
+        what = "Indexing uploads every article to Azure, which embeds each one and bills for it"
+    elif values.get("EMBEDDING_PROVIDER") == "local":
+        what = "Indexing embeds every article on this computer, which can take a long time"
+    else:
+        what = "Indexing sends every article to Voyage AI, which bills per token"
+    return what + ", so it starts only if you type y."
+
+
+def index_archive(values: dict) -> str:
+    """Offer to index the articles in data/, and say how it went. Returns what happened, which
+    "Next steps" needs to know:
+
+      "no-data"      data/ has no .json files
+      "no-packages"  the Python running this wizard lacks what the indexer imports: not started
+      "declined"     Enter or n at "Index them now?"
+      "failed"       the indexer exited with an error
+      "stopped"      Control+C while it ran
+      "indexed"      it ran to its end
+    """
     heading("Index your archive")
     data = sorted((ROOT / "data").glob("*.json"))
     if not data:
-        say("No .json files in data/ yet. Add your articles there (format: docs/IMPORTING.md), then run:")
-    else:
-        say(f"Found {len(data)} JSON file(s) in data/.")
-    script = "app/setup.py" if values["DEWEY_STACK"] == "azure" else "app/setup_postgres.py"
-    say(f"  python {script}")
-    if data and ask_yes("Index them now?", default=False):
-        run([sys.executable, script])
+        say("No .json files in data/ yet, so there is nothing to index.")
+        return "no-data"
+    say(f"Found {len(data)} JSON file(s) in data/.")
+    azure = values.get("DEWEY_STACK") == "azure"
+    lacking = missing_packages(values, indexing=True)
+    if lacking:
+        # Started anyway, the indexer stops at its first import, or at the first article when
+        # only the local models' packages are missing.
+        if REQUIREMENTS in lacking:
+            say("The indexer cannot run with this Python, because it does not have Dewey's packages:")
+        else:
+            say("The indexer cannot run with this Python, because it lacks the packages for local search models")
+            say(f"(PyTorch and {REQUIREMENTS_LOCAL}):")
+        say(paint(f"  {sys.executable}", BRAND))
+        say('So this wizard has not started it. "Next steps", below, says what to do and has the command to index.')
+        return "no-packages"
+    if lacking is None:
+        say("This wizard could not check that this Python has Dewey's packages, which the indexer needs.")
+    say(index_reason(values))
+    if not ask_yes("Index them now?", default=False):
+        say('  Not indexed now. "Next steps", below, has the command for later.')
+        return "declined"
+    try:
+        finished = run([sys.executable, index_script(values)])
+    except KeyboardInterrupt:
+        # Control+C reached the indexer as well, and subprocess.run() has made sure it is gone.
+        # The Postgres indexer saves each article as soon as it is embedded, and starts from the
+        # first article every time (PgVectorStore.index_documents); app/setup.py uploads them all
+        # before Azure embeds any.
+        say()
+        if azure:
+            say("  app/setup.py was stopped before it finished. Running it again uploads every article again.")
+        else:
+            say("  Indexing was stopped before it finished. Articles indexed so far are kept, but running the")
+            say("  indexer again embeds every article again.")
+        return "stopped"
+    if not finished:
+        say('  The indexer stopped with an error; its own message is above. "Next steps", below, has the')
+        say("  command to run it again.")
+        return "failed"
+    if azure:
+        # app/setup.py prints its upload and indexer errors and still exits as a success.
+        say("  app/setup.py has finished. That alone does not mean every article reached Azure: read its output")
+        say("  above for lines containing Error or Failed (Build the search index, in docs/AZURE.md).")
+    return "indexed"
 
 
 # ---------------------------------------------------------------- archive import
@@ -1342,7 +2285,7 @@ def get_archive(dry_run: bool = False) -> None:
             next_step = "full"
 
         if next_step == "full":
-            say("A big archive can take a while. Ctrl+C stops it (and this setup) without changing data/.")
+            say("A big archive can take a while. Ctrl+C stops it (and this wizard) without changing data/.")
             if run_importer(plan):
                 say()
                 offer_trial_cleanup(trial_files)
@@ -1361,48 +2304,88 @@ def get_archive(dry_run: bool = False) -> None:
         return
 
 
-def anthropic_credential_present(values: dict) -> bool:
-    """True when Dewey will find a Claude credential, whether or not it is in .env.
+# ---------------------------------------------------------------- Claude credential
 
-    An `ant auth login` profile and Workload Identity Federation both work without
-    ANTHROPIC_API_KEY, so demanding the key would tell the user Dewey can't start
-    when it can. app/providers/__init__.py holds the canonical version
-    (anthropic_credential_source); this installer is standard library only and runs
-    before the dependencies exist, so it can't import it.
-    tests/install/test_credential_agreement.py keeps the two in step.
+_claude_check = "not loaded yet"
+
+
+def load_claude_credentials():
+    """Dewey's own check of the Claude credential, or None if it can't be loaded.
+
+    An `ant auth login` sign-in and Workload Identity Federation both work without
+    ANTHROPIC_API_KEY, so demanding the key would tell people Dewey can't start when it can.
+    Which credential Dewey's Claude client will use is worked out in
+    app/providers/claude_credentials.py. That file is standard library only, so this installer
+    loads it by its path (importing `providers` would need Dewey's packages, which may not be
+    installed yet). One file, not a copy: the wizard and Dewey's startup can't disagree.
+    It is first loaded after the Python version check, so it never runs on a too-old Python.
     """
-    if values.get("ANTHROPIC_API_KEY", "").strip() or os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip():
-        return True
-    if (os.getenv("ANTHROPIC_FEDERATION_RULE_ID", "").strip()
-            and os.getenv("ANTHROPIC_ORGANIZATION_ID", "").strip()
-            and (os.getenv("ANTHROPIC_IDENTITY_TOKEN", "").strip()
-                 or os.getenv("ANTHROPIC_IDENTITY_TOKEN_FILE", "").strip())):
-        return True
-    config_dir = os.getenv("ANTHROPIC_CONFIG_DIR", "").strip()
-    if not config_dir:
-        config_dir = (os.path.join(os.getenv("APPDATA", ""), "Anthropic") if os.name == "nt"
-                      else os.path.expanduser("~/.config/anthropic"))
+    global _claude_check
+    if _claude_check == "not loaded yet":
+        import importlib.util  # only this function needs it
 
-    def profile_exists(name: str) -> bool:
-        return bool(name) and os.path.isfile(os.path.join(config_dir, "configs", f"{name}.json"))
-
-    named = os.getenv("ANTHROPIC_PROFILE", "").strip()
-    if named:
-        return profile_exists(named)  # a named profile that is missing is an error, not a fall-through
-    try:
-        with open(os.path.join(config_dir, "active_config"), encoding="utf-8") as fh:
-            active = fh.read().strip()
-    except OSError:
-        active = ""
-    return profile_exists(active) or profile_exists("default")
+        path = Path(__file__).resolve().parent / "app" / "providers" / "claude_credentials.py"
+        try:
+            spec = importlib.util.spec_from_file_location("dewey_claude_credentials", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except Exception:  # missing or unreadable (a partial copy of the repository): only a typed key counts
+            module = None
+        _claude_check = module
+    return _claude_check
 
 
-def missing_required(values: dict) -> list:
+def claude_environment(values: dict, env_file: Optional[dict] = None) -> dict:
+    """The variables Dewey's Claude client will see when Dewey is started from this terminal.
+
+    Dewey loads .env and then reads its environment, and python-dotenv never replaces a variable
+    that is already set. So the terminal's variables go over .env's lines (`env_file`: the ones
+    about to be written and the ones kept from before). ANTHROPIC_API_KEY is the wizard's own
+    answer when a key was typed: that is the one being saved.
+    """
+    env = dict(env_file or {})
+    env.update(os.environ)
+    if values.get("ANTHROPIC_API_KEY"):
+        env["ANTHROPIC_API_KEY"] = values["ANTHROPIC_API_KEY"]
+    return env
+
+
+def claude_credential(values: dict, env_file: Optional[dict] = None):
+    """What Dewey's check says about the Claude credential: a ClaudeCredential with a `state` of
+    usable, missing or unconfirmed (see app/providers/claude_credentials.py). None when that
+    file can't be loaded."""
+    check = load_claude_credentials()
+    return check.anthropic_credential_status(claude_environment(values, env_file)) if check else None
+
+
+def anthropic_credential_present(values: dict, env_file: Optional[dict] = None) -> bool:
+    """True when Dewey will find a Claude credential it can use, whether or not it is in .env.
+
+    The same verdict as providers.anthropic_credential_source() gives at Dewey's startup
+    (tests/install/test_credential_agreement.py holds the two together, and against the SDK).
+    A sign-in that looks signed out is not counted, though Dewey still starts with one.
+
+    The wizard itself no longer decides with this yes or no: missing_required() and
+    summary_report() use the three states (usable, missing, unconfirmed). It is kept for the
+    tests that hold the wizard and Dewey together, and for anyone who wants one answer.
+    """
+    credential = claude_credential(values, env_file)
+    if credential is None:
+        return bool(values.get("ANTHROPIC_API_KEY", "").strip())
+    return credential.state == "usable"
+
+
+def missing_required(values: dict, env_file: Optional[dict] = None) -> list:
+    """The settings Dewey can't start without. `env_file` is what .env will hold (see claude_environment)."""
     stack = values["DEWEY_STACK"]
     need = []
     if stack == "anthropic":
         need.append("DATABASE_URL")
-        if not anthropic_credential_present(values):
+        credential = claude_credential(values, env_file)
+        # Only "missing" goes on the list: there Dewey's Claude client stops, and so does Dewey. A
+        # sign-in that looks signed out ("unconfirmed") gets a warning in the Summary instead: Dewey
+        # starts with it, indexing needs no Claude credential, and the verdict comes from files alone.
+        if credential is None or credential.state == "missing":
             need.append("ANTHROPIC_API_KEY")
     if stack == "open":
         need += ["OPEN_LLM_MODEL", "DATABASE_URL"]
@@ -1411,6 +2394,120 @@ def missing_required(values: dict) -> list:
     if stack == "azure":
         need += [k for k in SECTIONS[-1][1]]
     return [k for k in need if not values.get(k)]
+
+
+def summary_report(values: dict, missing: list, env_file: Optional[dict] = None) -> List[str]:
+    """The Summary's lines after the .env text: what is still missing and, on the Claude stack,
+    what the person should know about the Claude credential before going on.
+
+    The lines about a sign-in come from app/providers/claude_credentials.py, the same ones Dewey
+    prints at startup. No secret is ever part of them.
+    """
+    lines = []
+    if missing:
+        lines.append(f"Still missing: {', '.join(missing)}. Dewey won't start until these are set; "
+                     "re-run this wizard or edit .env when you have them.")
+    if values.get("DEWEY_STACK") != "anthropic":
+        return lines
+    typed_key = bool(values.get("ANTHROPIC_API_KEY"))
+    check = load_claude_credentials()
+    if check is None:
+        if not typed_key:
+            lines.append("This wizard could not check for a saved Claude sign-in (app/providers/claude_credentials.py "
+                         "is missing or can't be read), so only an API key counts here.")
+        return lines
+
+    credential = check.anthropic_credential_status(claude_environment(values, env_file))
+    problem = ["  " + line for line in check.credential_problem_lines(credential)]
+    or_a_key = "  Or paste an Anthropic API key at the Claude question when you run this wizard again."
+    if credential.state == "missing" and problem:
+        lines.append("About ANTHROPIC_API_KEY: a saved Claude sign-in would do instead of a key, but the one "
+                     "selected can't be used.")
+        lines += problem + [or_a_key]
+    elif credential.state == "unconfirmed":
+        # Not under "Still missing": Dewey starts in this state, and the verdict comes from files alone.
+        lines.append("Dewey could not confirm a Claude credential. It will start, and searches work, but it can't "
+                     "write answers")
+        lines.append("with Claude (ask_archive, the demo page) until this is fixed. Importing and indexing don't "
+                     "need Claude.")
+        lines += problem + [or_a_key]
+    elif credential.source == "ANTHROPIC_API_KEY" and not typed_key:
+        lines.append("ANTHROPIC_API_KEY comes from this terminal and is not saved in .env. Dewey will use it when "
+                     "started from here; a program that starts Dewey by itself (an AI tool, a service) won't have it.")
+
+    for name, where in blank_claude_variables(check, env_file):
+        lines.append(check.blank_credential_message([name], where))
+    return lines
+
+
+def blank_claude_variables(check, env_file: Optional[dict] = None) -> list:
+    """(name, where) for ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN when Dewey will find them set
+    but blank; `where` is " in this terminal" or " in .env".
+
+    A blank key or token makes Dewey refuse to start whatever else is set. The terminal's value is
+    the one Dewey sees, even over a key typed here, so the typed key plays no part in this view.
+    `check` is the loaded claude_credentials module; `env_file` is what .env holds or will hold.
+    """
+    seen = dict(env_file or {})
+    seen.update(os.environ)
+    return [(name, " in this terminal" if name in os.environ else " in .env")
+            for name in check.blank_credential_variables(seen)]
+
+
+def check_claude(values: dict) -> tuple:
+    """The Claude line of the check step, as (name, status).
+
+    Only an API key typed into the wizard is tested against Anthropic, as before. For any other
+    credential the line says what Dewey's own check found, from files and variables: a sign-in
+    never passes in silence, and a problem always carries the word NOT. Nothing here contacts
+    Anthropic on the strength of a variable alone. .env has been written by now, so its lines are
+    read back. A blank key or token is reported first, and then nothing else is: Dewey won't
+    start with one, so "ok" for a key or "found" for a sign-in would be the wrong thing to read.
+    """
+    check = load_claude_credentials()
+    env_file = read_env(ENV_PATH)
+    blank = blank_claude_variables(check, env_file) if check else []
+    if blank:
+        what = " and ".join(f"{name} is set but empty{where}" for name, where in blank)
+        untested = " The API key was not tested." if values.get("ANTHROPIC_API_KEY") else ""
+        return "Claude credential", f"NOT usable: {what}, so Dewey won't start. See the Summary above.{untested}"
+    if values.get("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic
+            anthropic.Anthropic(api_key=values["ANTHROPIC_API_KEY"]).models.list(limit=1)
+            return "Anthropic API key", "ok"
+        except ImportError:
+            return "Anthropic API key", "skipped (install requirements first)"
+        except Exception as e:
+            if type(e).__name__ == "InvalidURL":
+                # From the HTTP library under Anthropic's: a web address it can't read. Its message
+                # quotes the part it stopped at, which can be part of a password, so it is not shown.
+                return "Anthropic API key", ("NOT checked: a web address set in this terminal is not one Anthropic's "
+                                             "library can read (ANTHROPIC_BASE_URL, or a proxy variable such as "
+                                             "HTTPS_PROXY). Its value is not shown here, because a web address can "
+                                             "contain a password.")
+            return "Anthropic API key", f"FAILED: {type(e).__name__}: {e}"
+    if check is None:
+        return "Claude credential", "NOT checked: no API key was given, and this wizard could not look for a saved sign-in"
+
+    credential = check.anthropic_credential_status(claude_environment(values, env_file))
+    untested = "not checked (this step tests an API key only)"
+    problem = check.credential_problem_lines(credential)
+    if credential.state == "usable" and credential.source == "profile":
+        how_to_look = "".join("\n      " + line for line in check.ant_status_lines(credential))
+        return "Claude sign-in", f"{untested}; found the saved sign-in {check.quoted_name(credential.profile)}.{how_to_look}"
+    if credential.state == "usable" and credential.source == "ANTHROPIC_API_KEY":
+        return "Anthropic API key", ("not checked: it is set in this terminal, and this step tests only a key "
+                                     "typed into the wizard")
+    if credential.state == "usable":
+        found = ("ANTHROPIC_AUTH_TOKEN is set" if credential.source == "ANTHROPIC_AUTH_TOKEN"
+                 else "Workload Identity Federation variables are set")
+        return "Claude credential", f"{untested}; {found}"
+    if credential.state == "unconfirmed":
+        return "Claude sign-in", f"NOT confirmed: {problem[0]} See the Summary above."
+    if problem:
+        return "Claude credential", f"NOT found: {problem[0]} See the Summary above."
+    return "Claude credential", 'NOT found; see "Still missing" in the Summary above'
 
 
 # ---------------------------------------------------------------- main
@@ -1423,18 +2520,185 @@ def ask_mcp(cur: dict) -> dict:
     say("Dewey's MCP server lets agent harnesses (Hermes Agent, DeepSeek Harness, Claude Code) and")
     say("chat apps (Open WebUI, LibreChat) search your archive. Over HTTP it requires a secret token,")
     say("which is stored in .env and never printed here.")
+    # Say what this run did with the token, in the future tense for saving: nothing is written
+    # until "Write this to .env?", and nothing at all with --dry-run. This step does not know
+    # which kind of run it is in, so the text says both. The token is never printed.
     existing = cur.get("DEWEY_MCP_TOKEN", "")
-    if len(existing) >= MCP_MIN_TOKEN_CHARS and ask_yes("Keep the existing MCP token?", default=True):
-        return {"DEWEY_MCP_TOKEN": existing}
+    usable = len(existing) >= MCP_MIN_TOKEN_CHARS
+    if usable:
+        if ask_yes("Keep the existing MCP token?", default=True):
+            say("  Kept the token that is already in .env. AI tools that use it need no change.")
+            return {"DEWEY_MCP_TOKEN": existing}
+        say("  This run made a new token to replace it.")
+    elif existing:
+        say(f"  The token in .env is shorter than {MCP_MIN_TOKEN_CHARS} characters, which the MCP server refuses,")
+        say("  so this run made a new one to replace it.")
+    else:
+        say("  This run made a new token.")
+    say("  It will be saved in .env with your other answers when you confirm at the end (never with --dry-run),")
+    say("  as DEWEY_MCP_TOKEN, and is never shown on screen.")
     if existing:
-        say("  Generating a new token: clients that used the old one will need the new value from .env.")
+        # A token the server refused never worked, so only a usable one can "stop working".
+        say("  Once it is saved, restart the MCP server if it runs over HTTP, and give each AI tool that connects")
+        say("  over HTTP the new value" + (": the old one stops working" if usable else "")
+            + " (docs/MCP.md, under Security).")
+    else:
+        say("  AI tools that start Dewey themselves on this computer (stdio) do not need it. Only tools that")
+        say("  connect over HTTP do; docs/MCP.md shows how to copy it for them.")
     return {"DEWEY_MCP_TOKEN": secrets.token_urlsafe(32)}
 
 
-def print_mcp_next_steps() -> None:
-    py = sys.executable
+# ------------------------------------------------------------------ Next steps
+
+def dewey_venv_has_packages(values: dict, where: PythonSituation) -> bool:
+    """True when the Dewey folder has a working .venv that this wizard is not running in, and
+    its Python, asked now, has everything this setup needs: it only has to be turned on."""
+    return where.dewey_venv_is_off and missing_packages(values, str(venv_python())) == []
+
+
+def installs_here(where: PythonSituation) -> bool:
+    """True when the place to install Dewey's packages is the Python running this wizard: it is
+    in a virtual environment, and the Dewey folder has no environment of its own waiting to be
+    turned on. Otherwise they belong in the Dewey folder's .venv: nothing should send people to
+    install into their computer's own Python, or into another project's environment that was
+    left turned on."""
+    return bool(where.venv) and not where.dewey_venv_is_off
+
+
+def package_step(values: dict, lacking: List[str], where: PythonSituation, wizard_again: bool = False) -> List[str]:
+    """The "get the packages" step of "Next steps", for a Python that lacks the requirements
+    files in `lacking`. The lines that start with two spaces are its commands.
+
+    Inside a virtual environment: pip, with that environment on (for the local search models,
+    the wizard again, because it asks which PyTorch fits, after a yes at its requirements.txt
+    question). Otherwise (see installs_here()): the
+    shared lines that make or turn on the Dewey folder's environment and run the wizard there.
+    And when that environment already has everything, turning it on is all there is to do,
+    unless `wizard_again` says the wizard has to run there anyway, for settings still missing.
+    Whichever it is, the commands are relative to the Dewey folder, so `cd` comes first when
+    the terminal is somewhere else.
+    """
+    if dewey_venv_has_packages(values, where):
+        return (["Nothing needs installing: the Python running this wizard lacks packages Dewey needs, but the",
+                 "virtual environment in the Dewey folder has them. Use it for the commands below."]
+                + environment_steps(where, rerun=wizard_again))
+    if not installs_here(where):
+        step = ["Install the packages Dewey needs in a virtual environment: run this wizard again in one, press",
+                "Enter to keep each saved answer, and let it install them."]
+        if values.get("DEWEY_STACK") in ("anthropic", "open") and not values.get("DATABASE_URL"):
+            # Enter keeps what is saved, and an earlier "later" at the Postgres question saved nothing.
+            step += ["No database address is saved yet, so the Postgres question starts again: Enter there picks its",
+                     "suggested answer, not your earlier one. Say that the database is running only once it is."]
+        return step + environment_steps(where)
+    lines: List[str] = []
+    local = f"the packages for local search models, PyTorch and {REQUIREMENTS_LOCAL}"
+    go = [] if where.in_root else ["First, go to the Dewey folder:", "  cd " + _typed(where.system, where.root)]
+    if REQUIREMENTS in lacking:
+        turned_on = "Install the packages Dewey needs, with the virtual environment turned on"
+        lines += ([turned_on + "."] + go + ["Then install them:"]) if go else [turned_on + ":"]
+        lines.append(f"  python -m pip install -r {REQUIREMENTS}")
+    if REQUIREMENTS_LOCAL in lacking:
+        # The wizard asks about PyTorch only after a yes at its requirements.txt question, so say
+        # which answer brings that question: someone who has just installed that file would say no.
+        if lines:
+            lines += [f"Then run this wizard again and let it install {local}.",
+                      f"Press Enter at its question about {REQUIREMENTS}, even though that file is installed by then."]
+        else:
+            lines += ([f"Install {local}, by running this wizard again."] + go
+                      + [f"Press Enter at its question about {REQUIREMENTS}, even though that file is already installed."])
+        lines += ["Only after a yes there does it ask which PyTorch fits this computer:",
+                  "  python install.py"]
+    return lines
+
+
+def remaining_steps(values: dict, missing: List[str], indexing: str,
+                    where: Optional[PythonSituation] = None) -> List[List[str]]:
+    """What is left to do after this run, in the order to do it. Each step is a list of lines:
+    what it is for, then its commands, which start with two spaces and have a line to
+    themselves. `missing` is the settings still to fill in; `indexing` is what index_archive()
+    returned, or "no-settings" when it was not reached. An empty list means nothing is left.
+
+    The words between the commands are plain: no quotes, apostrophes, brackets or other
+    characters a shell acts on, in case someone pastes a whole step into a terminal.
+    """
+    where = where or python_situation()
+    steps: List[List[str]] = []
+    lacking = missing_packages(values)  # None when the check could not be made: the MCP example below says so
+    # When the package step makes or turns on the Dewey folder's environment, the wizard is not
+    # run again before it: out here `python` is often no command at all (on a Mac), or is the
+    # Python that lacks the packages. It runs once, in that step, and takes the settings there.
+    in_package_step = bool(lacking) and not installs_here(where)
+    if missing:
+        fill = f"Fill in what is still missing: {', '.join(missing)}. Edit .env, or "
+        # A Claude sign-in that is missing or damaged is listed as ANTHROPIC_API_KEY; typing a key is
+        # only one way to fix it, and the Summary has printed the other.
+        claude = (["A working Claude sign-in also counts for ANTHROPIC_API_KEY. The Summary above says what to do."]
+                  if "ANTHROPIC_API_KEY" in missing else [])
+        steps.append([fill + "type what is missing when you run this wizard again in step 2."] + claude
+                     if in_package_step
+                     else [fill + "run this wizard again:"] + claude + ["  python install.py"])
+    if lacking:
+        steps.append(package_step(values, lacking, where, wizard_again=bool(missing)))
+    if not any((ROOT / "data").glob("*.json")):
+        steps.append(["Get your articles into the data folder. docs/IMPORTING.md explains how. To list the importers:",
+                      f"  python {IMPORT_SCRIPT} --help"])
+    if indexing != "indexed":
+        title = {
+            "declined": "Index your archive, unless it is already indexed and the files in data/ have not changed:",
+            "failed": "Index your archive again, once the error above is fixed:",
+            "stopped": "Index your archive again, from the beginning:",
+        }.get(indexing, "Index your archive:")
+        steps.append([title, f"  python {index_script(values)}"])
+    return steps
+
+
+def say_steps(steps) -> None:
+    """Print the steps from remaining_steps(), numbered. Nothing is printed when none are left."""
+    for number, lines in enumerate(steps, 1):
+        say(f"{number}. {lines[0]}")
+        for line in lines[1:]:
+            say(paint("   " + line, BRAND) if line.startswith("  ") else "   " + line)
+
+
+def mcp_python(values: dict, where: Optional[PythonSituation] = None) -> Tuple[str, str]:
+    """The Python the MCP example should name, and how it was chosen:
+
+      "this"     the one running this wizard: it has everything the MCP server needs
+      "venv"     the Dewey folder's .venv Python, which has it all when this one does not
+      "none"     neither has it yet: the Python the "get the packages" step installs into
+                 (this one or the Dewey folder's .venv: see installs_here())
+      "unknown"  the one running this wizard, because the check could not be made
+    """
+    where = where or python_situation()
+    lacking = missing_packages(values)
+    if lacking is None:
+        return sys.executable, "unknown"
+    if not lacking:
+        return sys.executable, "this"
+    if dewey_venv_has_packages(values, where):
+        return str(venv_python()), "venv"
+    return (sys.executable if installs_here(where) else str(venv_python())), "none"
+
+
+def print_mcp_next_steps(values: dict, where: Optional[PythonSituation] = None) -> None:
+    where = where or python_situation()
+    py, how = mcp_python(values, where)
     server = ROOT / "app" / "mcp_server.py"
+    in_dewey_folder = "the Python of the virtual environment in the Dewey folder"
     say("Connect an AI tool (full recipes for each client: docs/MCP.md):")
+    # Which Python the two commands below name, whenever it is not simply "this one, which has
+    # the packages". Plain words, like the steps above: they sit between commands.
+    if how == "venv":
+        say(f"  The commands below name {in_dewey_folder}. It has the")
+        say("  packages Dewey needs, and the Python running this wizard does not have them all.")
+    elif how == "none":
+        named = "the Python running this wizard" if installs_here(where) else in_dewey_folder
+        say("  The commands below will not work until the packages Dewey needs are installed: see the steps above.")
+        say(f"  They name {named}, where those steps install them.")
+        say("  If you install them somewhere else, change command: and the HTTP command to that Python.")
+    elif how == "unknown":
+        say("  This wizard could not check that this Python has the packages Dewey needs. If your AI tool says the")
+        say("  server failed to start, change command: and the HTTP command to the Python that has them.")
     say("  On this computer (stdio), e.g. Hermes Agent's ~/.hermes/config.yaml:")
     say("    mcp_servers:")
     say("      dewey:")
@@ -1461,13 +2725,7 @@ def main() -> int:
     say("  " + paint("─" * 44, DEEP, DIM))
     say("This walks you through choosing a stack, getting any accounts and keys it needs,")
     say("and writing your .env file. Secrets are typed hidden and stored only in .env.")
-    if sys.version_info < MIN_PYTHON:
-        say(f"\nDewey needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} to 3.13; this is {sys.version.split()[0]}.")
-        say("On a Mac or Windows, install Python 3.13 from")
-        say("  " + paint(LINKS["python"], BRAND, UNDERLINE))
-        say("On Linux, use your package manager (Python 3.11, 3.12 and 3.13 all work).")
-        say("A .venv folder made with this older Python won't work: delete it, make it again")
-        say("with the new Python, then re-run python install.py. docs/INSTALL.md shows each step.")
+    if not check_python():
         return 1
 
     current = read_env(ENV_PATH)
@@ -1485,7 +2743,7 @@ def main() -> int:
         values.update(ask_retrieval(stack, current))
         if "voyage" in (values["EMBEDDING_PROVIDER"], values["RERANK_PROVIDER"]):
             values.update(ask_voyage(current, interactive))
-        values.update(ask_postgres(current, interactive))
+        values.update(ask_postgres(current, interactive, dry_run=args.dry_run))
     if stack == "azure":
         values.update(ask_azure(current, interactive))
     values.update(ask_newsroom(current))
@@ -1498,11 +2756,13 @@ def main() -> int:
     content = render_env(to_write, {k: v for k, v in current.items() if k not in managed})
 
     heading("Summary")
-    missing = missing_required(values)
+    # What .env will hold: the lines kept from the previous file and this run's values. Dewey reads
+    # both, so the Claude credential is judged on both (and on this terminal's variables).
+    env_file = {**{k: v for k, v in current.items() if k not in managed}, **to_write}
+    missing = missing_required(values, env_file)
     say(redact(content))
-    if missing:
-        say(f"Still missing: {', '.join(missing)}. Dewey won't start until these are set; "
-            "re-run this installer or edit .env when you have them.")
+    for line in summary_report(values, missing, env_file):
+        say(line)
 
     postgres_stack = stack in ("anthropic", "open")
     if args.dry_run:
@@ -1520,15 +2780,12 @@ def main() -> int:
         check_services(values)
     if postgres_stack:
         get_archive()  # importers need no keys or database, so this runs even with settings missing
-    if not missing:
-        index_archive(values)
+    indexing = index_archive(values) if not missing else "no-settings"
 
     heading("Next steps")
-    if missing:
-        say(f"1. Fill in: {', '.join(missing)} (re-run python install.py)")
-        if postgres_stack:
-            say("2. Index your archive:  python app/setup_postgres.py")
-    print_mcp_next_steps()
+    where = python_situation()
+    say_steps(remaining_steps(values, missing, indexing, where))
+    print_mcp_next_steps(values, where)
     say("Optional demo page (this computer only):  python app/main.py   then open http://127.0.0.1:7860")
     say("Before relying on answers, ask questions you already know the answers to and check")
     say("each citation against the article it links to.")

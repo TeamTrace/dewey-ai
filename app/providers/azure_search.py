@@ -12,6 +12,8 @@ from openai import AzureOpenAI
 
 from models import AzureOpenAIConfig, AzureSearchConfig
 
+from .base import author_names
+
 
 def _odata_str(value: str) -> str:
     """Quote a string literal for an OData filter (single quotes are doubled)."""
@@ -39,14 +41,10 @@ def build_filter(metadata: Dict[str, Any]) -> Optional[str]:
     if end_date:
         filters.append(f"publish_date le {end_date}T23:59:59Z")
 
-    # Authors filter. Only added when at least one name is present: the previous
-    # version always appended `authors/any(a: )`, an invalid filter, when the
-    # author list was empty.
-    author_filters = [
-        f"a eq {_odata_str(author['name'])}"
-        for author in metadata["authors"]
-        if author.get("name")
-    ]
+    # Authors filter. author_names() (base.py) refuses malformed entries (MetadataError) and
+    # skips blank names, the same as the Postgres store; names are matched exactly as given.
+    # The clause is only added when a name is left: `authors/any(a: )` is an invalid filter.
+    author_filters = [f"a eq {_odata_str(name)}" for name in author_names(metadata)]
     if author_filters:
         filters.append(f"authors/any(a: {' or '.join(author_filters)})")
 
@@ -64,6 +62,10 @@ class AzureSearchRetriever:
         )
 
     def retrieve(self, metadata: Dict[str, Any]) -> List[str]:
+        # First, so a malformed author entry (MetadataError) stops the search before any Azure call.
+        filter = build_filter(metadata)
+        print(filter, file=sys.stderr)
+
         embedding = self.oai_client.embeddings.create(
             model=self.oai_config.embedding_deployment,
             input=metadata["question"],
@@ -71,9 +73,6 @@ class AzureSearchRetriever:
         vectors: List[VectorQuery] = [
             VectorizedQuery(vector=embedding.data[0].embedding, k_nearest_neighbors=50, fields="content_vector")
         ]
-
-        filter = build_filter(metadata)
-        print(filter, file=sys.stderr)
 
         results = self.search_client.search(
             search_text=metadata["question"],

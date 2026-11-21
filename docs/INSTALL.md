@@ -263,7 +263,7 @@ These steps are for Windows 11 and Windows PowerShell, with Windows 10 differenc
 Neither has been tested with Dewey.
 
 - **Rancher Desktop** (Apache 2.0) supports Windows 11, including Home (its page doesn't list Windows 10), and needs WSL installed first. Choose the **dockerd (moby)** container engine, which gives you the `docker` command the wizard looks for. Kubernetes is on by default; Dewey doesn't need it, and turning it off saves memory.
-- **Podman Desktop** (Apache 2.0) supports Windows 10 build 19043 or later and Windows 11, and needs administrator rights. It has no `docker` command for the wizard to find, so start the database yourself: `podman run` with the wizard's options and the image `docker.io/pgvector/pgvector:pg18`. Then answer `yes` at the wizard's Postgres question and enter `postgresql://dewey:YOURPASSWORD@127.0.0.1:5432/dewey`, with letters and digits only in YOURPASSWORD.
+- **Podman Desktop** (Apache 2.0) supports Windows 10 build 19043 or later and Windows 11, and needs administrator rights. It has no `docker` command for the wizard to find, so start the database yourself: `podman run` with the options of the wizard's command ([What the wizard asks](#what-the-wizard-asks), step 8) and the image `docker.io/pgvector/pgvector:pg18`. Two of those options, `--restart unless-stopped` and `-v dewey-db-data:/var/lib/postgresql`, haven't been checked with Podman. Then answer `yes` at the wizard's Postgres question and enter `postgresql://dewey:YOURPASSWORD@127.0.0.1:5432/dewey`, with letters and digits only in YOURPASSWORD.
 
 </details>
 
@@ -707,7 +707,7 @@ cd $HOME\dewey-ai
 .venv\Scripts\Activate.ps1
 ```
 
-Signs you forgot: no `(.venv)` in the prompt, `zsh: command not found: python` (Linux: `bash: python: command not found`; Windows: `Python was not found`) or `ModuleNotFoundError`. Your AI tool doesn't need it: it starts Dewey with the environment's own Python.
+Signs you forgot: no `(.venv)` in the prompt, `zsh: command not found: python` (Linux: `bash: python: command not found`; Windows: `Python was not found`), `ModuleNotFoundError`, or the wizard saying `This Python does not have Dewey's packages yet`. Your AI tool doesn't need it: it starts Dewey with the environment's own Python.
 
 ## Run the setup wizard
 
@@ -728,7 +728,7 @@ The setup wizard writes your settings to a [.env file](GLOSSARY.md#env-file) in 
 
 3. **Answer each question and press Enter** ([What the wizard asks](#what-the-wizard-asks)).
 
-`python install.py --dry-run` asks the same questions but only prints the result, with secrets masked: a [dry run](GLOSSARY.md#dry-run). It writes no `.env` and imports nothing, though a chat-model download you accept still happens. `--no-browser` suits a server without a desktop; it also skips the offer to download the chat model.
+`python install.py --dry-run` asks the same questions but only prints the result, with secrets masked: a [dry run](GLOSSARY.md#dry-run). One step differs: if you choose `docker` for the database, a dry run only shows the command, with `PASSWORD` in place of a password, and asks nothing more there. It writes no `.env` and imports nothing, though a chat-model download you accept still happens. `--no-browser` suits a server without a desktop; it also skips the offer to download the chat model.
 
 On Windows, the wizard prints a few macOS and Linux commands; the screens below give the ones to use ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)).
 
@@ -752,17 +752,17 @@ Answer from your setup's row (a dash means the wizard doesn't ask):
 | [Fully open on your own computer](STACKS.md#fully-open-on-your-own-computer) | `open` | `local` | `local` or `none` | press Enter (Ollama) |
 | [Open-weight models through OpenRouter](STACKS.md#open-weight-models-through-openrouter) | `open` | `local` | `local` or `none` | `https://openrouter.ai/api/v1` |
 
-Only the [embedding](GLOSSARY.md#embedding) choice is costly to change later ([why](STACKS.md#indexes-are-tied-to-one-embedding-model)); [reranking](GLOSSARY.md#reranking) and the chat model can change any time. On a first run, "(current)" by `anthropic` is only the wizard's starting point.
+Only the [embedding](GLOSSARY.md#embedding) choice is costly to change later ([why](STACKS.md#indexes-are-tied-to-one-embedding-model)); [reranking](GLOSSARY.md#reranking) and the chat model can change any time. On a first run nothing is saved yet, so the wizard marks its own starting points "(suggested)", `anthropic` at the stack question: that's only what Enter picks, not a recommendation. On later runs, "(current)" marks what's saved in `.env`.
 
 ### What the wizard asks
 
 You see only the screens your setup needs, in this order. A bracketed value such as `[anthropic]` is the default (Enter picks it); `(Y/n)` means Enter answers yes, `(y/N)` no. Pasted secrets stay hidden: press Enter after. At a hidden question, `-` clears the saved value.
 
-1. **The Python check.** `Dewey needs Python 3.11 to 3.13; this is 3.9.6.` means the environment uses Apple's old Python ([Troubleshooting](#troubleshooting)).
+1. **The Python check.** The wizard stops before its first question on a Python that can't install Dewey's packages. `Dewey needs Python 3.11 to 3.13; this is 3.9.6, which is too old.` means it was started with Apple's old Python; `which is too new.` means Python 3.15 or later. Either way it prints what to do next, usually the commands that make `.venv` again ([Troubleshooting](#troubleshooting) has them too). On Python 3.14, which isn't tested, it says so and carries on.
 
 2. **Which stack?** Type the stack from [your row](#which-setup-to-choose). You should see something like:
    ```text
-     1. anthropic (current): Claude writes the answers; your archive lives in Postgres. ...
+     1. anthropic (suggested): Claude writes the answers; your archive lives in Postgres. ...
    ...
    Choose a number or name [anthropic]:
    ```
@@ -798,11 +798,11 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 8. **Postgres with pgvector (where your archive is stored and searched).** Answer `yes` and paste its address (typed hidden) if you have a database, `docker` to get a command that starts one, or `later` (Dewey can't index or answer without one). `docker` is offered only if the wizard finds Docker. If you installed Docker after opening this window, press Control+C (nothing is saved yet), open a new window, [turn the environment on](#turn-it-on-in-every-new-terminal-window) and run the wizard again.
 
-   **If you choose `docker`:** the wizard prints four lines, starting with `docker run -d --name dewey-db`, with a password it made up. On macOS and Linux, select all four with your mouse, copy them (Command+C on a Mac; on Linux, right-click and Copy), paste them into a new terminal window (Command+N on a Mac; Ctrl+Shift+N in GNOME Terminal and Ptyxis on Linux) and press Enter.
+   **If you choose `docker`:** the wizard first asks Docker whether a [container](GLOSSARY.md#docker) named `dewey-db` already exists. It only looks: it never creates, starts or removes anything. If there is none, it prints five lines, starting with `docker run -d --name dewey-db`, with a password it made up, or the one already saved in `.env`. On macOS and Linux, select all five with your mouse, copy them (Command+C on a Mac; on Linux, right-click and Copy), paste them into a new terminal window (Command+N on a Mac; Ctrl+Shift+N in GNOME Terminal and Ptyxis on Linux) and press Enter.
 
-   On Windows, that form fails in PowerShell. In a new tab (Ctrl+Shift+T; on Windows 10, a second window), paste this line, with the 24 letters and digits after `POSTGRES_PASSWORD=` in the wizard's printout in place of PASSWORD_FROM_WIZARD:
+   On Windows, that form fails in PowerShell. In a new tab (Ctrl+Shift+T; on Windows 10, a second window), paste this line, with the letters and digits after `POSTGRES_PASSWORD=` in the wizard's printout in place of PASSWORD_FROM_WIZARD:
    ```powershell
-   docker run -d --name dewey-db -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey -e POSTGRES_PASSWORD=PASSWORD_FROM_WIZARD -p 127.0.0.1:5432:5432 pgvector/pgvector:pg18
+   docker run -d --name dewey-db --restart unless-stopped -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey -e POSTGRES_PASSWORD=PASSWORD_FROM_WIZARD -v dewey-db-data:/var/lib/postgresql -p 127.0.0.1:5432:5432 pgvector/pgvector:pg18
    ```
    The first time, Docker downloads the database image (about 165 MB). You should see something like:
    ```text
@@ -814,9 +814,15 @@ You see only the screens your setup needs, in this order. A bracketed value such
    ```bash
    docker logs dewey-db
    ```
-   Wait until `PostgreSQL init process complete; ready for start up.` is followed by `database system is ready to accept connections` (if not, run it again a few seconds later). Then go back to the wizard's window and answer `Y` at `Is it running? (Y/n):`. **Don't answer `n`:** the next run's new password won't match this container. The wizard saves the address and password (your shell's history also keeps the pasted password). The database listens on 127.0.0.1 only, so your network can't reach it (on Linux, with Docker 28.0 or newer).
+   Wait until `PostgreSQL init process complete; ready for start up.` is followed by `database system is ready to accept connections` (if not, run it again a few seconds later). When the command makes a new container on database files that were already there (after the container was removed, for example), the log has `PostgreSQL Database directory appears to contain a database; Skipping initialization` in place of the first of those two lines ([the image's start script](https://github.com/docker-library/postgres/blob/master/18/bookworm/docker-entrypoint.sh); seen in our test run). Then go back to the wizard's window and answer `Y` at `Is it running? (Y/n):`. The wizard saves the address and password when it writes `.env`, after its last question (your shell's history also keeps the pasted password). If you answer `n`, it keeps the password in `.env` but writes no address, so the next run prints the same command, or finds the container if you started it meanwhile. The database listens on 127.0.0.1 only, so your network can't reach it (on Linux, with Docker 28.0 or newer).
 
-   Tested so far: this command made the November 2026 test database, with Colima on a Mac. No automated test covers it.
+   The command's `--restart unless-stopped` makes the database start again when Docker starts, unless you stopped it yourself ([Docker's restart policies](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md)). Its `-v dewey-db-data:/var/lib/postgresql` keeps the database's files in a Docker volume named `dewey-db-data`, which stays if the container is removed ([Docker's volumes](https://github.com/docker/docs/blob/main/content/manuals/engine/storage/volumes.md); [where the image keeps its data](https://github.com/docker-library/docs/blob/master/postgres/content.md)). This `dewey-db` is separate from the `db` database that Docker Compose runs ([DEPLOYMENT.md](DEPLOYMENT.md#what-the-compose-file-runs)): an archive indexed in one isn't in the other.
+
+   **If `dewey-db` already exists,** the wizard prints no `docker run` command: the name is taken, and a database keeps the password it was created with. With that password saved in `.env`, the wizard uses the container if it's running, and prints `docker start dewey-db` if it isn't. With `no saved password`, it doesn't make one up: it asks for the database's address instead (press Enter if you don't know it) and points to "The database container already exists" under [Troubleshooting](#troubleshooting). When the container is gone but its files are left (`it still has the volume dewey-db-data`), the wizard prints the command only if `.env` has the password: those files keep the one they were created with.
+
+   **If Docker doesn't answer** (it isn't running, or your account needs `sudo` for it), the wizard says `Docker didn't answer` and asks `Start Docker, then look again? (Y/n):`. Start Docker, then press Enter. If Docker still doesn't answer, the wizard prints the command anyway and asks `Is it running? (y/N):`. Type `y` only once the database is running: until then the wizard saves nothing about it, not even a new password. With `--dry-run`, the wizard asks Docker nothing, shows the command with PASSWORD in place of a password, and asks you nothing more in this step.
+
+   Tested so far: this command, under another container name and port, with Colima on a Mac (November 2026). It started, kept its restart setting and its named volume, and a container made again on the same volume kept its data and its first password. Not tested: restarting the computer to see the database come back by itself. Automated tests cover what the wizard prints and saves, with a stand-in for Docker; none starts a real database.
 
 9. **Azure.** Its 11 questions are explained in [AZURE.md](AZURE.md#with-the-setup-wizard), which also covers importing ([AZURE.md](AZURE.md#prepare-your-articles)).
 
@@ -825,9 +831,9 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 10. **Newsroom details (used in Dewey's prompts).** Type your newsroom's name, the earliest article date in your archive, and your region (`none` for a national outlet).
 
-11. **Connect AI tools (MCP).** The wizard saves a secret [bearer token](GLOSSARY.md#bearer-token) for Dewey's [MCP server](GLOSSARY.md#mcp-server) in `.env`, without showing it; a re-run asks `Keep the existing MCP token? (Y/n)`: press Enter. Only AI tools that connect over HTTP use it ([MCP.md](MCP.md#before-you-start-http)).
+11. **Connect AI tools (MCP).** Dewey's [MCP server](GLOSSARY.md#mcp-server) needs a secret [bearer token](GLOSSARY.md#bearer-token) when AI tools connect over HTTP. On a first run the wizard makes one and says so (`This run made a new token.`), without showing it; it's saved in `.env` as `DEWEY_MCP_TOKEN` with your other answers. A re-run asks `Keep the existing MCP token? (Y/n)`: press Enter. AI tools that start Dewey themselves on this computer don't need the token; only tools that connect over HTTP do ([MCP.md](MCP.md#before-you-start-http)).
 
-12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs.
+12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs. On Claude with an `ant auth login` sign-in, `Dewey could not confirm a Claude credential` usually means the sign-in looks signed out: follow the lines printed under it (most often an `ant auth login` command). The wizard carries on meanwhile ([STACKS.md](STACKS.md#claude-anthropic-api)).
 
 13. **Write this to .env? (Y/n)** Press Enter. You should see something like:
     ```text
@@ -837,17 +843,21 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 14. **Install Python dependencies.** Press Enter at `Install requirements.txt now? (Y/n):` (the `$` lines are commands it runs itself: don't type them). For local search models, answer the double negative `Does this machine lack an NVIDIA GPU?` with `Y` on a Mac or Windows. On Linux, answer `Y` unless you have an NVIDIA RTX 20 or GTX 16 series card or newer with driver 580 or newer ([details](STACKS.md#local-search-models)).
 
-    If it says `You're not in a virtual environment.` instead, press Enter (no), then Control+C: your answers are already in `.env`. [Turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each answer.
+    If it says `You're not in a virtual environment.` instead, press Enter (no) at `Install into the current Python anyway? (y/N):`. Unless that Python happens to have Dewey's packages, the wizard then says `This Python does not have Dewey's packages yet`, doesn't offer to index, and lists what to do under Next steps. Your answers are already in `.env`: let it finish (importing works without the packages) or press Control+C, then [turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each saved answer. One answer is not kept: until a database address is saved (`later`, or `n` at `Is it running?`, saves none), Enter at the Postgres question picks the wizard's suggested answer again, which is `docker` when it finds Docker. Answer that question again, and say the database is running only once it is.
 
-15. **Check credentials and services** (only when nothing is missing): one line per service ([what to look for](#check-that-it-worked)). It skips a Voyage key (checking "would make a billed API call"), Azure and `ant auth login`.
+    If you answer `n` at `Install requirements.txt now?`, the wizard says the same about this Python, or `This Python already has Dewey's packages` when there was nothing to install. If pip fails, it says `pip stopped with an error`: pip's own message, just above that line, says why ([Troubleshooting](#troubleshooting) has the common ones). To try again, run the wizard again.
+
+    With local search models, press Enter at `Install requirements.txt now?` even when `requirements.txt` is already installed: the wizard asks about PyTorch only after a yes there.
+
+15. **Check credentials and services** (only when nothing is missing): a result for each service ([what to look for](#check-that-it-worked)). It skips a Voyage key (checking "would make a billed API call") and Azure. For an `ant auth login` sign-in it prints `Claude sign-in: not checked`: it tests only an API key.
 
 16. **Get your archive into Dewey.** At `Where is your archive?`, type your source's name or number (`json`: files already in `data/`); with an empty `data/`, Enter picks `skip`. Accept the 20-article [trial run](GLOSSARY.md#trial-run), check its report and a few stories in the sample file, then choose `full` at `What next?` ([IMPORTING.md](IMPORTING.md#run-an-import)). After a finding marked `needs a look`, the wizard suggests `change` instead. On Windows, the printed `read -rs` and `export` lines work only on macOS and Linux ([the PowerShell way](IMPORTING.md#passwords-and-keys)).
 
     If you choose `change`, the wizard also asks for extra importer options, such as `--date-format '%m/%d/%Y'`. On Windows, type them without quotes (`--date-format %m/%d/%Y`); there, options with spaces work only if you run the importer yourself ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)).
 
-17. **Index your archive** (asked only when no setting is missing and `data/` has article files). **`Index them now? (y/N):` defaults to no: type `y`.** [Indexing](GLOSSARY.md#indexing) takes a while, and with Voyage AI it costs money. Answer no if you skipped installing the packages. On `azure`, the same question runs `python app/setup.py` ([AZURE.md](AZURE.md#build-the-search-index)).
+17. **Index your archive** (asked only when no setting is missing, `data/` has article files and the wizard's Python isn't missing Dewey's packages). **`Index them now? (y/N):` defaults to no: type `y`.** Pressing Enter never starts it: [indexing](GLOSSARY.md#indexing) takes a while, and with Voyage AI or Azure it costs money. The line above the question says which applies to your setup, and ends `so it starts only if you type y.` If the packages are missing, the wizard doesn't ask: it says `The indexer cannot run with this Python`, and Next steps says what to do. If the indexer fails, the wizard says `The indexer stopped with an error`. If you stop it with Control+C, the wizard says so and carries on to Next steps ([what stopping keeps](#if-you-stop-halfway)). On `azure`, the same question runs `python app/setup.py`, and the wizard then reminds you to read its output for `Error` or `Failed` ([AZURE.md](AZURE.md#build-the-search-index)).
 
-18. **Next steps.** It lists what's left to do, but not indexing you turned down at step 17 ([Check that it worked](#check-that-it-worked), step 2). On Windows, its Hermes Agent example needs single quotes around your paths, not double ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)); [MCP.md](MCP.md#client-recipes) has complete recipes.
+18. **Next steps.** A numbered list of what's left, in the order to do it: settings to fill in, packages to install, articles to import, and the indexing command whenever indexing didn't finish in this run (`python app/setup_postgres.py`; on `azure`, `python app/setup.py`). When nothing is left, there is no list. Below it, the AI-tool example names a Python that has Dewey's packages: the one that ran the wizard, or else the one in the Dewey folder's `.venv`. If neither has them yet, it says `The commands below will not work until the packages Dewey needs are installed`, names the Python the listed steps install them into, and says to change `command:` and the HTTP command if you install them somewhere else. If it couldn't check, it says so and names the Python that ran the wizard. On Windows, its Hermes Agent example needs single quotes around your paths, not double ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)); [MCP.md](MCP.md#client-recipes) has complete recipes.
 
 <details><summary>Sources</summary>
 
@@ -882,7 +892,7 @@ Your computer's section and the wizard's screens give the other download sizes.
 
 ### If you stop halfway
 
-- **Control+C** stops the wizard at any question (`Cancelled; nothing further was changed.`). Nothing is saved before `Write this to .env?`; after it, re-run the wizard and press Enter to keep each answer.
+- **Control+C** stops the wizard at any question (`Cancelled; nothing further was changed.`). Nothing is saved before `Write this to .env?`; after it, re-run the wizard and press Enter to keep each saved answer (the Postgres question starts again if no database address was saved: see step 14).
 - **Stopping an import** leaves `data/` as it was. **Stopping the indexer** keeps finished articles, but re-running it embeds every article again (time, or money with Voyage AI).
 - **Stopping after starting the Docker database,** before answering `Y`, leaves its password unsaved ([Troubleshooting](#troubleshooting): "The database container already exists").
 
@@ -893,13 +903,14 @@ Your computer's section and the wizard's screens give the other download sizes.
      Anthropic API key: ok
      Postgres: ok, pgvector 0.8.7 available
    ```
-   On the fully open setup, look for `Chat model server: ok, 'qwen3:8b' is available`. A `FAILED` or `NOT` line says what's wrong ([Troubleshooting](#troubleshooting)); re-run the wizard to check again.
+   On the fully open setup, look for `Chat model server: ok, 'qwen3:8b' is available`. A `FAILED`, `NOT` or `older than 0.8` line says what's wrong ([Troubleshooting](#troubleshooting)); re-run the wizard to check again.
+   With an `ant auth login` sign-in instead of a key, the Claude line reads `Claude sign-in: not checked ...`: the wizard found the sign-in's files but did not test it.
 
 2. **Make sure your archive is indexed.** The indexer's last line looks something like:
    ```text
    🎉 Indexed 41 article(s) as 188 chunk(s).
    ```
-   If you skipped it, run it now. On every setup except Azure:
+   If you skipped it, or the wizard couldn't run it, run it now (the wizard's Next steps shows the same command). On every setup except Azure:
    ```bash
    python app/setup_postgres.py
    ```
@@ -922,10 +933,12 @@ The demo page is a small [Gradio](https://www.gradio.app/) chat page for trying 
    ```text
    Dewey: Listening on 127.0.0.1, first free port from 7860 (this computer only).
    ...
+   Dewey: Share links: off, always. The page has no login, so Dewey never makes a public link.
+   Dewey: Gradio, which serves the page, prints a tip about share=True when it starts. Ignore it.
    * Running on local URL:  http://127.0.0.1:7860
    * To create a public link, set `share=True` in `launch()`.
    ```
-   Ignore the `share=True` line: Dewey keeps public links off. Leave the window open.
+   Ignore the last line, as Dewey's own lines above it say: Dewey keeps public links off, because the page has no login. Leave the window open.
 
 2. **Open the address** on the `Running on local URL` line, usually http://127.0.0.1:7860 (7861 or higher if that port is busy).
 
@@ -1010,7 +1023,7 @@ On Windows, these steps are *not tested by us*.
    ```powershell
    & "$PWD\.venv\Scripts\python.exe" "$PWD\app\mcp_server.py"
    ```
-   If it waits silently, Dewey is fine: press Control+D once to stop it (Control+C doesn't); on Windows, close the window instead. `dewey-mcp: configuration error:` says which setting to fix.
+   If it waits silently, Dewey is fine: press Control+D once to stop it (Control+C doesn't); on Windows, close the window instead. Lines that start `Dewey: warning: could not confirm a Claude credential`, followed by waiting, also mean it started: searches work, but answers need the sign-in fixed ([STACKS.md](STACKS.md#claude-anthropic-api)). `dewey-mcp: configuration error:` says which setting to fix.
 
 4. **Ask it something.** Start `claude` in any folder and name the server, for example:
 
@@ -1075,30 +1088,34 @@ After a restart, start the parts that don't come back by themselves:
 
 1. **Docker:** open Docker Desktop and wait until it's running (to have it open at login, turn on Settings > General > "Start Docker Desktop when you sign in to your computer"), or run `colima start`. Linux's Docker Engine starts by itself.
 
-2. **The database,** which stays stopped after a restart (this works in PowerShell too):
+2. **The database.** One made with the wizard's current command starts again when Docker starts, unless you stopped it yourself (we haven't restarted a computer to watch this happen). To check (this works in PowerShell too):
+   ```bash
+   docker ps
+   ```
+   If no line ends in `dewey-db`, start it:
    ```bash
    docker start dewey-db
    ```
-   It prints `dewey-db`, and `docker ps` should show it `Up` (your archive is kept). To start it with Docker from now on, run `docker update --restart unless-stopped dewey-db` once.
+   It prints `dewey-db` (your archive is kept). A `dewey-db` made by an earlier version of the wizard stays stopped after every restart, until you run `docker update --restart unless-stopped dewey-db` once: see "An older dewey-db" under [Troubleshooting](#troubleshooting).
 
 3. **Ollama** (fully open setup): open the app on a Mac; Windows and Linux start it by themselves. `ollama -v` prints `Warning: could not connect to a running Ollama instance` when it isn't running.
 
 4. **The demo page,** if you want it: [turn on the virtual environment](#turn-it-on-in-every-new-terminal-window) and run `python app/main.py`. Your AI tool needs nothing.
 
-**Keep your archive safe.** To bring the database back, use `docker start dewey-db`, never the wizard's `docker run` command again: a new container starts empty. These delete your indexed archive, or leave it where Dewey can't find it:
+**Keep your archive safe.** A database made with the wizard's current command keeps its files in a Docker volume named `dewey-db-data`, outside the container. If the container is removed (`docker rm dewey-db`, or `docker system prune` while it's stopped), the files stay: run the wizard again, choose `docker` and paste its command, which makes a new container on the same volume, with your archive in it. These still delete the archive:
 
-- `docker rm -v dewey-db`
-- `docker system prune` while `dewey-db` is stopped
-- `docker volume prune` after the container is gone
+- `docker volume rm dewey-db-data`, or `docker volume prune --all`, after the container is gone
 - Docker Desktop's Clean up data, and Reset to factory defaults
 - uninstalling Docker Desktop
 - `colima delete` (its help warns "This deletes everything"), above all with `--data`
+
+A `dewey-db` made by an earlier version of the wizard has no named volume ("An older dewey-db" under [Troubleshooting](#troubleshooting)), so these also delete its archive, or leave it where Dewey can't find it: `docker rm -v dewey-db`, `docker system prune` while it's stopped, and `docker volume prune` after the container is gone. To bring an older `dewey-db` back, use `docker start dewey-db`. Never remove the container and paste the wizard's `docker run` command: the new container starts empty.
 
 If that happens, start a new database and index again.
 
 <details><summary>Sources</summary>
 
-Checked November 2026: Docker's pages on [Docker Desktop's settings](https://github.com/docker/docs/blob/main/content/manuals/desktop/settings-and-maintenance/settings.md) (start at sign-in, off by default), [starting containers automatically](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md) (`docker update --restart`), [`docker rm`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_rm.md), [`docker system prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/system_prune.md), [`docker volume prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/volume_prune.md), [troubleshooting](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/troubleshoot/_index.md) (Clean up data), the [Mac FAQ](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/faqs/macfaqs.md) and [uninstalling](https://github.com/docker/docs/blob/main/content/manuals/desktop/uninstall.md); and `colima delete --help` (Colima 0.10.3).
+Checked November 2026: Docker's pages on [Docker Desktop's settings](https://github.com/docker/docs/blob/main/content/manuals/desktop/settings-and-maintenance/settings.md) (start at sign-in, off by default), [starting containers automatically](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md) (`docker update --restart`), [`docker rm`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_rm.md), [`docker system prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/system_prune.md), [`docker volume prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/volume_prune.md), [`docker volume rm`](https://github.com/docker/cli/blob/master/docs/reference/commandline/volume_rm.md), [`docker update`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_update.md), [volumes](https://github.com/docker/docs/blob/main/content/manuals/engine/storage/volumes.md), [troubleshooting](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/troubleshoot/_index.md) (Clean up data), the [Mac FAQ](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/faqs/macfaqs.md) and [uninstalling](https://github.com/docker/docs/blob/main/content/manuals/desktop/uninstall.md); and `colima delete --help` (Colima 0.10.3).
 
 </details>
 
@@ -1159,24 +1176,31 @@ Find the message you see. Fixes with several commands come after the table.
 
 | You see | What to do |
 |---|---|
-| `zsh: command not found: python` (Linux: `bash: python: command not found`) | The virtual environment is off: [turn it on](#turn-it-on-in-every-new-terminal-window). |
+| `zsh: command not found: python` (Linux: `bash: python: command not found`) | The virtual environment is off: [turn it on](#turn-it-on-in-every-new-terminal-window). If you see it right after turning it on, the Dewey folder was renamed or moved after `.venv` was made, or the Python that made `.venv` has been removed: recreate the environment (below). |
 | `zsh: command not found: python3.13` (Linux: `bash: python3.13: command not found`) | Open a new window; if it persists, install Python 3.13 ([Mac](#get-your-mac-ready); [Linux](#get-your-linux-computer-ready), step 3). |
-| `Dewey needs Python 3.11 to 3.13; this is 3.9.6.` | The environment uses Apple's old Python: recreate it (below). |
+| `Dewey needs Python 3.11 to 3.13; this is 3.9.6, which is too old.` (or another number, or `too new`) | The wizard stopped before its first question because this Python can't install Dewey's packages: Apple's 3.9, say, or 3.15. Follow the steps it prints; usually they recreate the environment (below). |
+| `Dewey is tested with Python 3.11 to 3.13; this is 3.14.10.` (or another number) | Not an error: the wizard carries on. Python 3.13 is the safer choice. To switch, press Control+C, then follow the wizard's steps if it printed any, or recreate the environment with 3.13 (below). |
 | `No matching distribution found for voyageai==0.6.0`, or `Building wheel for pandas` then a long wait or a compiler error (Linux: `metadata-generation-failed`) | The environment uses Python 3.15 or 3.14: recreate it with 3.13 (Ubuntu 24.04: 3.12). |
 | `error: externally-managed-environment` | pip ran outside the environment: turn it on. Never add `--break-system-packages`. |
 | `CERTIFICATE_VERIFY_FAILED` | Mac with python.org's Python: in the Finder, open Applications, then Python 3.13, and double-click Install Certificates.command. |
 | `[notice] A new release of pip is available: 26.2.2 -> 26.3` | Ignore it if the first number is 26.2.2 or higher; if lower, run step 4 of [Create a virtual environment](#create-a-virtual-environment). |
+| `This Python does not have Dewey's packages yet`, or `The indexer cannot run with this Python` (the wizard) | The wizard ran outside the virtual environment, or its install was skipped or failed. Do what its Next steps lists: usually, [turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter at `Install requirements.txt now?`. |
 | `ModuleNotFoundError` | Turn the environment on; if it's on, run `python -m pip install -r requirements.txt`. For `torch` or `sentence_transformers`, also install the local search models ([STACKS.md](STACKS.md#local-search-models)). |
 | `running scripts is disabled on this system` (Windows) | Do step 5 of [Get your Windows PC ready](#get-your-windows-pc-ready), then activate again. |
 | `py`, `git` or `docker` `is not recognized` (Windows) | Open a new PowerShell window; if it persists, install it. |
 | `ensurepip is not available`, or `ensurepip` ... `returned non-zero exit status 1.` (Linux) | Run `sudo apt install python3.13-venv` (Ubuntu 24.04: `python3.12-venv`), then recreate the environment (below). |
 | `permission denied while trying to connect to the` Docker API or daemon socket (Linux) | Do step 6 of [Get your Linux computer ready](#get-your-linux-computer-ready) and log in again, or put `sudo` in front. |
 | `Cannot connect to the Docker daemon at` ... `Is the docker daemon running?`, or (Docker 29 and later) `failed to connect to the docker API at` ... `check if the path is correct and if the daemon is running` | Start Docker (Docker Desktop, `colima start`, or on Linux `sudo systemctl enable --now docker`), wait, then try again. |
-| `Conflict. The container name "/dewey-db" is already in use` | See "The database container already exists" below. |
-| `password authentication failed for user "dewey"` | `.env` has a newer password than the container: see "The database password doesn't match" below. |
+| `Conflict. The container name "/dewey-db" is already in use` | The database exists already. Don't remove it, even though Docker's message suggests that: see "The database container already exists" below. |
+| The wizard says `no saved password`, or `it still has the volume dewey-db-data` | A database exists whose password isn't in `.env`: see "The database container already exists" below. |
+| The wizard says `Docker didn't answer` | Docker isn't running, or your account needs `sudo` for it. Start Docker, then press Enter at `Start Docker, then look again? (Y/n):`. If you use `sudo` for Docker on Linux, answer `n` there, run the command the wizard prints with `sudo ` in front, and answer `y` at `Is it running? (y/N):` once the database is running. |
+| `password authentication failed for user "dewey"` | `.env` has a different password from the database: see "The database password doesn't match" below. |
+| `Connection refused` on port 5432, or your AI tool reports `a problem on the Dewey server`, after a restart | The database isn't running: start Docker, then run `docker start dewey-db` ([Start Dewey again later](#start-dewey-again-later)). |
 | `port is already allocated`, `ports are not available` or `address already in use` | Another program, often another Postgres, uses port 5432: see "Port 5432 is taken" below. |
 | `Postgres: FAILED:` in the wizard's check | The database isn't running or its address is wrong: [start it](#start-dewey-again-later), then check again. |
-| `This configuration (DEWEY_STACK=anthropic) needs these environment variables:`, or `DEWEY_STACK=anthropic needs a Claude credential.` | A setting or key is missing: run the wizard again and fill it in (for `ant auth login`, see [STACKS.md](STACKS.md#claude-anthropic-api)). |
+| `Postgres: connected, but pgvector 0.6.0 is older than 0.8` in the wizard's check, or a warning that starts `Dewey: warning: the pgvector extension in this database is version` | Date and byline searches can miss stories until pgvector is upgraded: [STACKS.md](STACKS.md#upgrade-pgvector) has the steps. |
+| `This configuration (DEWEY_STACK=anthropic) needs these environment variables:`, or `DEWEY_STACK=anthropic needs a Claude credential.` | A setting or key is missing, or the saved sign-in can't be used: the rest of the message says which, and prints the commands to run. Then run the wizard again (for `ant auth login`, see [STACKS.md](STACKS.md#claude-anthropic-api)). |
+| `Dewey: warning: could not confirm a Claude credential.` when Dewey starts, or `Dewey could not confirm a Claude credential` in the wizard | The saved sign-in looks signed out, or can't be used as it is: the lines under the message say which, and what to run (usually `ant auth login`). Until then searches work, but `ask_archive` and the demo page fail. After signing in, a running Dewey needs no restart. |
 | An error about Azure, or `DEWEY_STACK is 'azure' (or unset)`, when you didn't choose Azure | `.env` is missing or has no `DEWEY_STACK` (Dewey then uses `azure`), for example because the wizard stopped before `Write this to .env?`: go to the Dewey folder and run the wizard again. |
 | `Chat model server: FAILED to reach` ... `Is Ollama running?` | Open the Ollama app; on Linux, run `sudo systemctl restart ollama`. |
 | `reachable, but 'qwen3:8b' isn't listed` | Run `ollama pull qwen3:8b`, with your model's name, or fix `OPEN_LLM_MODEL` in `.env`: it must match a name after `found:` exactly. |
@@ -1223,7 +1247,7 @@ Find the message you see. Fixes with several commands come after the table.
 
 </details>
 
-**Recreate the virtual environment.** If the prompt starts with `(.venv)`, type `deactivate` first. Then make it again with the right Python (Ubuntu 24.04: `python3.12`), turn it on, update pip again on Linux (step 4 of [Create a virtual environment](#create-a-virtual-environment)), and run the wizard again.
+**Recreate the virtual environment.** If the prompt starts with `(.venv)`, type `deactivate` first. Then make it again with the right Python (Ubuntu 24.04: `python3.12`), turn it on, update pip again on Linux (step 4 of [Create a virtual environment](#create-a-virtual-environment)), and run the wizard again. The wizard prints these commands itself when it stops because `.venv` was made with a Python it can't use. On macOS and Linux it also prints them when `.venv` was made before the Dewey folder was renamed or moved: turning that environment on no longer finds its Python, and Python's guide says to make an environment again in its new place ([venv guide](https://github.com/python/cpython/blob/3.13/Doc/library/venv.rst), checked November 2026). Making it again empties `.venv`, so press Enter at `Install requirements.txt now?` to install the packages again.
 
 On macOS and Linux:
 
@@ -1247,43 +1271,101 @@ py -3.13 -m venv --clear .venv
 
 <details><summary>The database container already exists</summary>
 
-Not tested by us: these steps come from Docker's documentation and source code. List your containers:
+The wizard looks for a container named `dewey-db` before it prints a command. You are here because Docker said `Conflict. The container name "/dewey-db" is already in use`, or because the wizard said it has `no saved password` for the container, or that `it still has the volume dewey-db-data`. Don't remove the container, even though Docker's message suggests it: your archive may be in it. A database keeps the password it was created with, so either give the wizard that password or give the database a new one. Not tested by us: these steps come from Docker's and the Postgres image's documentation.
 
-```bash
-docker ps -a
-```
+1. **See what's there.**
+   ```bash
+   docker ps -a
+   ```
+   If the `dewey-db` STATUS says `Up`, it's running. If it says `Exited` or `Created`, start it:
+   ```bash
+   docker start dewey-db
+   ```
+   If no line ends in `dewey-db`, only the database's files are left: go to "If only the files are left", below.
 
-If the `dewey-db` STATUS says `Up`, it's already running and you don't need the wizard's command. If it says `Exited` or `Created`, start it:
+2. **If you can find the database's password,** run the wizard again, type `yes` at the Postgres question, and at `Database URL` (typed hidden) enter `postgresql://dewey:PASSWORD@127.0.0.1:5432/dewey`, with the password in place of PASSWORD. Look for it in the earlier copies of your settings, which the wizard keeps in the Dewey folder as `.env.bak-` plus a date and time, and in any other copy of Dewey on this computer. On macOS and Linux (what it finds appears on screen, each line after the name of its file; `no matches found`, or on Linux `No such file or directory`, means there are no such files):
+   ```bash
+   grep -HE 'DATABASE_URL|POSTGRES_PASSWORD' .env.bak-*
+   ```
+   On Windows (PowerShell):
+   ```powershell
+   Select-String -Path .env.bak-* -Pattern 'DATABASE_URL|POSTGRES_PASSWORD'
+   ```
+   In a `DATABASE_URL` line of exactly that shape, the password is between `dewey:` and `@`. If the files differ, the database has the password from the run whose command you pasted, usually the oldest.
 
-```bash
-docker start dewey-db
-```
+3. **If you can't find it, give the database a new password and keep what's in it:** "The database password doesn't match", below.
 
-That container keeps the password from the run that created it, not the one the wizard printed this time. If the wizard saved a database address that time, run the wizard again, answer `yes` at the Postgres question and press Enter to keep the saved address. If it didn't, use "The database password doesn't match". Or, only if nothing has been indexed yet, delete that database with `docker rm -v dewey-db` and paste the wizard's new command.
+4. **Or start again with an empty database,** only if nothing in it matters, for example because nothing was indexed yet. These two commands delete the database and everything indexed in it:
+   ```bash
+   docker rm -f -v dewey-db
+   ```
+   ```bash
+   docker volume rm dewey-db-data
+   ```
+   For a `dewey-db` made by an earlier version of the wizard, the second command reports that there is no such volume, which is fine. Then run the wizard again and choose `docker`.
+
+**If only the files are left** (the wizard said `it still has the volume dewey-db-data`), a new container would use those files, which keep the password they were created with. Choose one:
+
+- Find that password as in step 2. Open `.env` in a text editor and set the database's address, with the password in place of THE_PASSWORD: `DATABASE_URL='postgresql://dewey:THE_PASSWORD@127.0.0.1:5432/dewey'` (change the `DATABASE_URL` line if there is one). Then run the wizard again and type `docker` at the Postgres question: it prints the command that makes a new container on those files. Paste it and answer `Y`.
+- Or keep the files and set a new password: do the same with 20 or more letters and digits of your own as the password. The database still has its old password then, so follow "The database password doesn't match", below, from its step 2.
+- Or delete the files and start empty, only if nothing in them matters: run step 4's second command, then the wizard.
 
 </details>
 
 <details><summary>The database password doesn't match</summary>
 
-This sets the container's password to the one in `.env` and keeps your data. It hasn't been tested by us. First, in the Dewey folder, show the password in `.env` (it appears on screen). On macOS and Linux:
+This gives the database the password that `.env` has, and keeps your data. It hasn't been tested by us. It works without the old password because Postgres asks for none from inside its own container ([the image's documentation](https://github.com/docker-library/docs/blob/master/postgres/content.md)).
+
+1. **Find the password in `.env`,** in the Dewey folder (it appears on screen). On macOS and Linux:
+   ```bash
+   grep -E 'DATABASE_URL|POSTGRES_PASSWORD' .env
+   ```
+   On Windows (PowerShell):
+   ```powershell
+   Select-String -Path .env -Pattern 'DATABASE_URL|POSTGRES_PASSWORD'
+   ```
+   If there is a `DATABASE_URL` of exactly the shape `postgresql://dewey:PASSWORD@127.0.0.1:5432/dewey`, use the password inside it, between `dewey:` and `@`: the wizard uses that one first. Otherwise use the value of `POSTGRES_PASSWORD`, if it has only letters and digits. If `.env` has neither, choose a new password of 20 or more letters and digits; you type it in steps 2 and 3.
+
+2. **Give the database that password.** The database must be running (`docker start dewey-db`). Run this, with the password in place of PASTE_THE_PASSWORD. It works in PowerShell too.
+   ```bash
+   docker exec dewey-db psql -U dewey -d dewey -c "ALTER USER dewey PASSWORD 'PASTE_THE_PASSWORD'"
+   ```
+   Postgres replies `ALTER ROLE`.
+
+3. **Check that `.env` has the database's address.** If the password came from inside `DATABASE_URL`, you're done. If it came from `POSTGRES_PASSWORD`, run the wizard again and choose `docker`: it finds the container and writes the address itself (if it asks `Is it running?`, answer `y`). If you chose a new password, run the wizard again, type `yes` at the Postgres question and enter `postgresql://dewey:PASSWORD@127.0.0.1:5432/dewey` at `Database URL` (typed hidden), with your password in place of PASSWORD.
+
+</details>
+
+<details><summary>An older dewey-db</summary>
+
+Until November 2026 the wizard's command had no `--restart` and no `-v`. A `dewey-db` made that way works, with two differences: it stays stopped after a restart, and its files are in an unnamed Docker volume, which `docker rm -v dewey-db` deletes with the container. If you type `docker` at the wizard's Postgres question and it finds such a container, it says that the container `doesn't use the volume dewey-db-data`. With any other answer the wizard doesn't look at Docker. To check yourself, list Docker's volumes: a database made with the current command has one named `dewey-db-data`.
 
 ```bash
-grep POSTGRES_PASSWORD .env
+docker volume ls
 ```
 
-On Windows (PowerShell):
-
-```powershell
-Select-String -Path .env -Pattern POSTGRES_PASSWORD
-```
-
-Then run this, with the value between the quotes in place of PASTE_PASSWORD_FROM_ENV. It works in PowerShell too.
+**Make it start with Docker.** This changes the container's restart policy and nothing else ([Docker's restart policies](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md)):
 
 ```bash
-docker exec dewey-db psql -U dewey -d dewey -c "ALTER USER dewey PASSWORD 'PASTE_PASSWORD_FROM_ENV'"
+docker update --restart unless-stopped dewey-db
 ```
 
-Postgres replies `ALTER ROLE`.
+**Then either keep it as it is,** and avoid the three commands under [Keep your archive safe](#start-dewey-again-later) that delete an unnamed volume.
+
+**Or move to a named volume.** Docker can't add a volume to an existing container ([`docker update`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_update.md) has no option for volumes), so this means a new, empty database and indexing again, which embeds every article again: time with local search models, money with Voyage AI. Not tested by us.
+
+1. Check that your article files are still in `data/`: the new index is built from them.
+2. Remove the old database. This deletes its index:
+   ```bash
+   docker rm -f -v dewey-db
+   ```
+3. Run the wizard and type `docker` at the Postgres question (the suggested answer may be `yes`), paste its command and answer `Y`. It uses the password already in `.env`, or makes a new one. The wizard then carries on: when it asks `Index them now?`, type `y` (that is step 4), or press Enter and do step 4 yourself.
+4. Index again, unless the wizard just did:
+   ```bash
+   python app/setup_postgres.py
+   ```
+
+If you know Postgres, `pg_dump` before step 2 and `pg_restore` after step 3 carry the index across without embedding again (not tested by us).
 
 </details>
 

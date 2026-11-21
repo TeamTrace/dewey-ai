@@ -155,7 +155,7 @@ The `DEWEY_STACK` setting in `.env`, which picks who runs the chat model and sea
 
 `open` means open-weight, not OpenAI: the `open` setups don't use OpenAI's own service.
 
-**In Dewey:** if `DEWEY_STACK` is missing, Dewey runs `azure`. The setup wizard always writes it; on a first run, `anthropic` is selected only as a starting point.
+**In Dewey:** if `DEWEY_STACK` is missing, Dewey runs `azure`. The setup wizard always writes it; on a first run its list starts at `anthropic`, marked "(suggested)", which is only what Enter picks.
 
 **More:** [STACKS.md: The setups at a glance](STACKS.md#the-setups-at-a-glance)
 
@@ -524,7 +524,7 @@ Windows's command-line shell; its prompt starts with `PS`. Windows includes Wind
 
 The programming language Dewey is written in.
 
-**In Dewey:** 3.11, 3.12 and 3.13 work; 3.14 is untested, and 3.15 can't install Dewey. A Mac's `python3` may be Apple's 3.9, too old, so the guides type `python3.13`.
+**In Dewey:** 3.11, 3.12 and 3.13 work; 3.14 is untested, and 3.15 can't install Dewey. A Mac's `python3` may be Apple's 3.9, too old, so the guides type `python3.13`. The [setup wizard](#setup-wizard) stops on a Python it can't use and says how to switch; on 3.14 it says that version isn't tested, and carries on.
 
 **More:** INSTALL.md for your [Mac](INSTALL.md#get-your-mac-ready), [Windows PC](INSTALL.md#get-your-windows-pc-ready) or [Linux computer](INSTALL.md#get-your-linux-computer-ready)
 
@@ -606,7 +606,7 @@ A secret sent with each request to prove the sender may connect (`Authorization:
 
 A tool that runs programs in containers, sealed boxes made from an image (the packaged program). Docker Desktop (Mac and Windows) is free only for personal use, education, non-commercial open source and businesses under 250 employees and $10 million revenue. Docker's summary doesn't mention nonprofits. Colima (Mac) and Docker Engine (Linux) are free.
 
-**In Dewey:** optional. Use Docker Engine 28.0 or newer: older versions can expose ports published on 127.0.0.1 to your local network.
+**In Dewey:** optional. Use Docker Engine 28.0 or newer: older versions can expose ports published on 127.0.0.1 to your local network. The setup wizard's Docker database is a container named `dewey-db`; one made with the current command keeps its files in a volume named `dewey-db-data` (storage that Docker manages outside the container).
 
 **More:** INSTALL.md for your [Mac](INSTALL.md#get-your-mac-ready), [Windows PC](INSTALL.md#get-your-windows-pc-ready) or [Linux computer](INSTALL.md#get-your-linux-computer-ready) · [DEPLOYMENT.md: Why Docker Engine 28.0 or newer](DEPLOYMENT.md#why-docker-engine-280-or-newer)
 
@@ -672,7 +672,7 @@ A program that offers tools to AI tools over MCP and does the work, such as a se
 
 An extension that adds [vector](#vector) search to Postgres ([pgvector/pgvector](https://github.com/pgvector/pgvector)).
 
-**In Dewey:** every setup except Azure needs 0.8 or newer. Older versions can return fewer articles when you filter by date or byline.
+**In Dewey:** every setup except Azure needs 0.8 or newer. Older versions can return fewer articles when you filter by date or byline; Dewey warns when it finds one ([how to upgrade](STACKS.md#upgrade-pgvector)).
 
 **More:** [STACKS.md: Postgres with pgvector](STACKS.md#postgres-with-pgvector)
 

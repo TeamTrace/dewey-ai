@@ -64,7 +64,9 @@ class AnthropicLLM:
         answer_effort: str = "medium",
         client: Optional[anthropic.Anthropic] = None,
     ):
-        # anthropic.Anthropic() reads ANTHROPIC_API_KEY from the environment.
+        # No arguments: the SDK picks the credential itself (a key or token, then the sign-in
+        # ANTHROPIC_PROFILE names, then federation variables, then the active sign-in).
+        # build_stack() checks it first; see claude_credentials.py.
         self.client = client or anthropic.Anthropic()
         self.model = model
         self.metadata_effort = metadata_effort

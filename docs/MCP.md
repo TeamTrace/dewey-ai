@@ -46,6 +46,10 @@ calls ([offering only `search_archive`](#client-recipes)).
 without them it stops with `dewey-mcp: configuration error`, naming what's missing. On `open`, your
 model server (Ollama, for example) needn't be running for searches.
 
+One case differs on Claude: if the saved sign-in looks signed out (after `ant auth logout`), the
+server starts and prints a warning. Searches work; `ask_archive` fails until you sign in again
+([STACKS.md](STACKS.md#claude-anthropic-api)).
+
 **Things to know:**
 
 - **`text` is an excerpt,** about 380 words on the [Postgres](GLOSSARY.md#postgres) setups
@@ -173,6 +177,9 @@ Your AI tool (the [MCP client](GLOSSARY.md#mcp-client)) reaches Dewey's server o
    If it prints nothing and waits, it works: press Control+D once to stop it (Control+C doesn't). On
    Windows, close the window instead (*not tested by us*). If it prints
    `dewey-mcp: configuration error` and exits, fix `.env` first ([common errors](INSTALL.md#troubleshooting)).
+   If it prints lines that start `Dewey: warning: could not confirm a Claude credential` and then waits,
+   it has started too: searches work, but answers need the sign-in fixed
+   ([STACKS.md](STACKS.md#claude-anthropic-api)).
 
 Examples on this page use macOS paths. Elsewhere they look like this:
 
@@ -322,8 +329,11 @@ response buffering if your proxy buffers (*unverified; check your proxy's docs*)
 
 The examples name the server `dewey` (any name works). Use your own paths from
 [Before you start: stdio](#before-you-start-stdio) and the URL from
-[Before you start: HTTP](#before-you-start-http). The wizard's last screen also prints the paths,
-correctly if you ran it with the virtual environment on.
+[Before you start: HTTP](#before-you-start-http). The wizard's last screen also prints the paths. It
+names a Python that has Dewey's packages: the one that ran the wizard, or else the one in the Dewey
+folder's `.venv`. If neither has them yet, it says so: install the packages first (the same screen
+lists how), or change `command:` to the Python that has them. If it couldn't check, it says so and names
+the Python that ran the wizard.
 
 On Windows, put paths in YAML in single quotes (`'C:\Users\you\dewey-ai\app\mcp_server.py'`): in double
 quotes, `\` starts an escape and breaks the path. Change the wizard's printed Hermes example too. In
@@ -868,9 +878,9 @@ November 2026.
 
 | Symptom | Likely cause and fix |
 |---|---|
-| A stdio client says the server failed to start or disconnected, or `claude mcp list` shows `✘ Failed to connect` | Run the server by hand ([Before you start: stdio](#before-you-start-stdio), step 3) to see its message |
+| A stdio client says the server failed to start or disconnected, or `claude mcp list` shows `✘ Failed to connect` | Run the server by hand ([Before you start: stdio](#before-you-start-stdio), step 3) to see its message. A `ModuleNotFoundError` there means `.venv`'s Python doesn't have Dewey's packages: turn the environment on and run `python -m pip install -r requirements.txt` ([INSTALL.md](INSTALL.md#troubleshooting)). If the server starts there but not from your AI tool, check that the tool's `command` and `args` are the two paths from that section |
 | `dewey-mcp: configuration error` names a chat-model setting, though you only search | The server needs those settings to start ([The two tools](#the-two-tools)) |
-| A tool call fails with "a problem on the Dewey server ... reference ..." | Find that reference in the server's log (stderr; `docker compose logs dewey`) |
+| A tool call fails with "a problem on the Dewey server ... reference ..." | Find that reference in the server's log (stderr; `docker compose logs dewey`). On your own computer after a restart, first check that the database is running ([INSTALL.md](INSTALL.md#start-dewey-again-later)). On Claude, also look for `could not confirm a Claude credential` where the server started |
 | `docker compose up` stops with `required variable DEWEY_MCP_TOKEN is missing a value` | Add `DEWEY_MCP_TOKEN` to `.env` ([how](#before-you-start-http)) |
 | `401` | The token is missing or wrong (header: `Authorization: Bearer YOUR_TOKEN`). Check Open WebUI's Key field, or the variable Hermes or LibreChat reads |
 | The client offers to "log in" or "authenticate" to Dewey | Dewey has no OAuth sign-in, so the header is missing or the token is wrong. In LibreChat, set `requiresOAuth: false` |
@@ -882,6 +892,7 @@ November 2026.
 | Claude Desktop doesn't list `dewey` | Read its log ([Claude Desktop](#claude-desktop), step 6). Check the file for missing commas, curly quotes and (Windows) single backslashes, then quit the app completely and reopen it |
 | `ask_archive` times out | A slow model: raise the client's tool timeout, or use `search_archive` |
 | A byline filter finds nothing | Use the whole byline as your archive prints it ([rules](#the-two-tools)) |
+| A date or byline search returns fewer stories than you expect | Look in the server's log for `Dewey: warning: the pgvector extension in this database is version`: pgvector older than 0.8 can miss stories ([STACKS.md](STACKS.md#upgrade-pgvector)). Through a connection pooler, see [DEPLOYMENT.md](DEPLOYMENT.md#managed-postgres-with-pgvector) |
 | The first call with local search models is very slow or times out | The models load, and the reranker downloads, the first time ([STACKS.md](STACKS.md#local-search-models)). Run one search before you connect clients |
 
 ## For developers

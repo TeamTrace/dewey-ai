@@ -22,6 +22,7 @@ import io  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import shutil  # noqa: E402
+import signal  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
 from unittest import mock  # noqa: E402
@@ -30,6 +31,7 @@ import import_archive  # noqa: E402
 from importers import IMPORTERS, common, drupal, ghost, wordpress_api  # noqa: E402
 from tests.importers import test_drupal, test_ghost  # noqa: E402
 from tests.importers.test_wordpress_api import APP_PASSWORD, APP_USER, FakeWordPress  # noqa: E402
+from tests.install.test_packages import make_environment  # noqa: E402
 
 try:
     import pexpect
@@ -235,24 +237,33 @@ class WizardImportTests(unittest.TestCase):
         shutil.copy2(REPO / "app" / "import_archive.py", self.root / "app" / "import_archive.py")
         shutil.copytree(REPO / "app" / "importers", self.root / "app" / "importers",
                         ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(REPO / "app" / "providers", self.root / "app" / "providers")  # for claude_credentials.py
         (self.root / "data").mkdir()
         (self.root / "bin").mkdir()  # PATH: no ollama or docker, whatever this machine has
 
-    def wizard(self, script, *args):
+    def wizard(self, script, *args, python=None):
+        """Run the wizard with this script of (prompt to wait for, answer) pairs. `python` is the
+        Python to run it with, when that is not the one running the tests."""
         env = {k: v for k, v in os.environ.items()
                if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")
                and k not in ("WORDPRESS_USER", "WORDPRESS_APP_PASSWORD", "DRUPAL_USER", "DRUPAL_PASSWORD",
                              "GHOST_CONTENT_API_KEY")}
         env.update(PATH=str(self.root / "bin"), NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost",
                    PYTHONDONTWRITEBYTECODE="1")
+        if python is not None:
+            env.pop("PYTHONPATH", None)  # another Python must see its own packages only, not the test runner's
         transcript = io.StringIO()
-        child = pexpect.spawn(sys.executable, ["install.py", "--no-browser", *args], cwd=str(self.root),
-                              env=env, encoding="utf-8", timeout=60, dimensions=(50, 200))
+        # preexec_fn: a test run started in the background of a script inherits "ignore Control+C",
+        # and the wizard would inherit it too; the Control+C test then waits 60 seconds and fails.
+        child = pexpect.spawn(str(python or sys.executable), ["install.py", "--no-browser", *args], cwd=str(self.root),
+                              env=env, encoding="utf-8", timeout=60, dimensions=(50, 200),
+                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
         child.logfile_read = transcript
         try:
             for pattern, answer in script:
                 child.expect(pattern)
                 child.sendline(answer() if callable(answer) else answer)
+            pattern = "the end of the wizard"
             child.expect(pexpect.EOF)
         except (pexpect.TIMEOUT, pexpect.EOF) as e:
             raise AssertionError(f"wizard didn't reach {pattern!r}; output so far:\n{transcript.getvalue()}") from e
@@ -394,6 +405,7 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn(f"python app/import_archive.py wordpress-export --file {WXR_FIXTURE} --limit 20", out)
         self.assertNotIn("Imported ", out)
         self.assertNotIn("  $ ", out)  # no command was run
+        self.assertNotIn("Next steps", out)  # it stops before the steps that ask a Python about its packages
         self.assertEqual(self.data_files(), [])
         self.assertFalse((self.root / ".env").exists())
 
@@ -449,6 +461,136 @@ class WizardImportTests(unittest.TestCase):
         self.assertEqual(self.env_token(), token)
         self.assertNotIn(token, out)
 
+    def test_first_run_marks_nothing_current_and_says_the_token_is_new(self):
+        # Issue #19, boxes (e) and (f), through a real terminal. \S* allows for the colour codes
+        # a terminal gets between a value and its mark.
+        out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("(current)", out)   # nothing is saved yet, so nothing is "current"
+        self.assertRegex(out, r"anthropic\S* \(suggested\)")
+        self.assertRegex(out, r"local\S* \(suggested\)")
+        mcp_step = out.split("Connect AI tools (MCP)", 1)[1].split("Summary", 1)[0]
+        self.assertIn("This run made a new token.", mcp_step)
+        self.assertIn("will be saved in .env", mcp_step)
+        self.assertIn("DEWEY_MCP_TOKEN", mcp_step)
+        self.assertIn("(stdio) do not need it", mcp_step)
+        token = self.env_token()
+        self.assertGreaterEqual(len(token or ""), 32)
+        self.assertNotIn(token, out)
+
+        # The re-run finds those answers in .env: now they are "current", and the token is kept.
+        rerun = self.OPEN_STACK + [("Keep the existing MCP token", "")] + self.WRITE_ENV
+        out, status = self.wizard(rerun + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        for saved in ("open", "local", "none"):
+            self.assertRegex(out, rf"{saved}\S* \(current\)")
+        self.assertNotRegex(out, r"anthropic\S* \((suggested|current)\)")
+        mcp_step = out.split("Connect AI tools (MCP)", 1)[1].split("Summary", 1)[0]
+        self.assertIn("Kept the token", mcp_step)
+        self.assertNotIn("made a new", mcp_step)
+        self.assertEqual(self.env_token(), token)
+        self.assertNotIn(token, out)
+
+    def wizard_in_its_own_environment(self, modules, *index_answers, install="n", runs_nothing=True):
+        """The wizard as the README has people run it: with the Python of a .venv in the Dewey
+        folder. This one is a throwaway (`python -m venv --without-pip`) holding only empty
+        packages named `modules`, so what the wizard finds there does not depend on what the
+        test runner's Python has installed. data/ holds one article file, the database question
+        is answered with an address nothing connects to, and `install` is the answer at
+        "Install requirements.txt now?" (no, unless a test says otherwise).
+        Returns (everything printed, what was printed under "Next steps"), without colour codes."""
+        python = make_environment(self.root / ".venv", modules)
+        (self.root / "data" / "mine.json").write_text("[]")
+        url = "postgresql://dewey:not-a-real-password@db.example.org:5432/archive"
+        script = (self.with_postgres_answers((self.POSTGRES, "yes"), ("Database URL", url))
+                  + [("Write this to .env", "y"), ("Install requirements.txt now", install)]
+                  + self.NO_CHECKS + [(self.WHERE, "")] + list(index_answers))
+        out, status = self.wizard(script, python=python)
+        out = re.sub(r"\x1b\[[0-9;]*m", "", out)  # a real terminal gets colours around commands and prompts
+        self.assertEqual(status, 0, out)
+        self.assertIn("Using the 1 JSON file(s) already in data/.", out)
+        if runs_nothing:
+            self.assertNotIn("  $ ", out)  # the wizard ran no command: not pip, not the indexer
+        self.assertIn("\u2500\u2500 Next steps ", out)
+        return out, out.rsplit("\u2500\u2500 Next steps ", 1)[1]
+
+    def test_a_python_without_dewey_packages_is_never_asked_to_index(self):
+        # Issue #19, boxes (b), (c) and (d), through a real terminal. The indexer used to be offered,
+        # and started, with a Python that stops at its first import.
+        out, next_steps = self.wizard_in_its_own_environment([])
+        install_step = out.split("Install Python dependencies", 1)[1].split("Get your archive into Dewey", 1)[0]
+        self.assertIn("This Python does not have Dewey's packages yet:", install_step)
+        self.assertIn(str(install.venv_python().relative_to(install.ROOT)), install_step)   # which Python
+        self.assertIn('"Next steps", at the end of this wizard, says what to do.', install_step)
+        self.assertNotIn("Index them now", out)
+        self.assertIn("The indexer cannot run with this Python", out)
+        # What is left, in order: the packages, then indexing. Each command on a line of its own.
+        self.assertRegex(next_steps, r"\n1\. Install the packages Dewey needs[^\r\n]*\r\n +python -m pip install -r "
+                                     r"requirements\.txt\r\n")
+        self.assertRegex(next_steps, r"\n2\. Index your archive:\r\n +python app/setup_postgres\.py\r\n")
+        self.assertNotRegex(next_steps, r"\n3\. ")
+        # The example names the Python the packages will be installed in, and says it is not ready.
+        self.assertRegex(next_steps, r'command: "[^"\r\n]*[/\\]\.venv[/\\][^"\r\n]*python[^"\r\n]*"')
+        self.assertIn("will not work until the packages Dewey needs are installed", next_steps)
+        self.assertRegex(next_steps, r"change command: and the HTTP\s+command")
+
+    def test_enter_at_index_them_now_leaves_the_command_in_next_steps(self):
+        # Box (c): No stays the default, the line above the question says why, and the command is
+        # listed afterwards.
+        modules = (install.requirement_modules({"DEWEY_STACK": "open"})
+                   + install.local_model_modules({"DEWEY_STACK": "open", "EMBEDDING_PROVIDER": "local"}))
+        self.assertIn("torch", modules)
+        out, next_steps = self.wizard_in_its_own_environment(modules, (r"Index them now\? \S*\(y/N\)", ""))
+        install_step = out.split("Install Python dependencies", 1)[1].split("Get your archive into Dewey", 1)[0]
+        self.assertIn("This Python already has Dewey's packages, so nothing needs installing.", install_step)
+        index_step = out.split("Index your archive", 1)[1].rsplit("\u2500\u2500 Next steps ", 1)[0]
+        self.assertIn("Found 1 JSON file(s) in data/.", index_step)
+        self.assertRegex(index_step, r"on this computer, which can take a long time, so it starts only if you type "
+                                     r"y\.\r\nIndex them now\?")
+        self.assertIn("Not indexed now.", index_step)
+        self.assertRegex(next_steps, r"\n1\. Index your archive, unless it is already indexed[^\r\n]*:\r\n +python "
+                                     r"app/setup_postgres\.py\r\n")
+        self.assertNotRegex(next_steps, r"\n2\. ")
+        for not_needed in ("requirements", "change command:", "will not work", "could not check"):
+            self.assertNotIn(not_needed, next_steps)
+        self.assertRegex(next_steps, r'command: "[^"\r\n]*[/\\]\.venv[/\\][^"\r\n]*python[^"\r\n]*"')
+
+    def test_a_pip_error_is_explained_and_the_wizard_carries_on(self):
+        # Box (b): a pip error used to get one line, "pip failed". Here pip really fails, and
+        # harmlessly: the throwaway environment was made without pip, so `python -m pip` stops at
+        # once with "No module named pip" and nothing can be downloaded or installed.
+        out, next_steps = self.wizard_in_its_own_environment([], install="", runs_nothing=False)
+        install_step = out.split("Install Python dependencies", 1)[1].split("Get your archive into Dewey", 1)[0]
+        self.assertRegex(install_step, r"\$ \S+ -m pip install -r requirements\.txt")   # the wizard did try
+        self.assertIn("No module named pip", install_step)                             # pip's own message
+        after_pip = install_step.split("No module named pip", 1)[1]
+        self.assertIn("pip stopped with an error. Its own message, above, says why.", after_pip)
+        self.assertIn("This Python does not have Dewey's packages yet:", after_pip)
+        self.assertIn("To try again, run this wizard again.", after_pip)
+        self.assertNotIn("Local models need PyTorch", install_step)   # nothing more is tried after the error
+        self.assertNotIn("Index them now", out)
+        self.assertIn("The indexer cannot run with this Python", out)
+        self.assertRegex(next_steps, r"\n1\. Install the packages Dewey needs")
+        self.assertRegex(next_steps, r"\n2\. Index your archive:\r\n +python app/setup_postgres\.py\r\n")
+
+    def test_control_c_while_the_indexer_runs_does_not_end_the_wizard(self):
+        # Box (c): a stopped index run used to end the wizard on the spot ("Cancelled"), so the
+        # command to index again was never shown. A stand-in indexer says it has started and
+        # then waits, as a long index run does; Control+C is typed while it waits.
+        (self.root / "app" / "setup_postgres.py").write_text(
+            'import time\nprint("STAND-IN INDEXER STARTED", flush=True)\ntime.sleep(300)\n')
+        modules = (install.requirement_modules({"DEWEY_STACK": "open"})
+                   + install.local_model_modules({"DEWEY_STACK": "open", "EMBEDDING_PROVIDER": "local"}))
+        out, next_steps = self.wizard_in_its_own_environment(
+            modules, (r"Index them now\? \S*\(y/N\)", "y"), ("STAND-IN INDEXER STARTED", "\x03"), runs_nothing=False)
+        self.assertRegex(out, r"\$ \S+ app/setup_postgres\.py")   # the wizard started it, with its own Python
+        self.assertNotIn("Cancelled", out)
+        index_step = out.split("STAND-IN INDEXER STARTED", 1)[1].rsplit("\u2500\u2500 Next steps ", 1)[0]
+        self.assertIn("Indexing was stopped before it finished.", index_step)
+        self.assertRegex(next_steps, r"\n1\. Index your archive again, from the beginning:\r\n +python "
+                                     r"app/setup_postgres\.py\r\n")
+        self.assertIn("mcp_servers:", next_steps)
+
 
     # --- the Postgres question (issue #5: none of its three answers but "later" had ever run in a test)
 
@@ -462,13 +604,43 @@ class WizardImportTests(unittest.TestCase):
         at = next(i for i, (_, answer) in enumerate(self.OPEN_STACK) if answer == "later")
         return self.OPEN_STACK[:at] + list(steps) + self.OPEN_STACK[at + 1:]
 
-    def docker_on_path(self):
-        """Make Docker look installed. The wizard only checks that the command exists; if it ever
-        ran it, the stub would leave a note."""
+    # Everything the wizard may ask Docker: these two listings, in this order. It only prints the
+    # commands that change something. Widening the look has to fail a test first: `docker inspect`,
+    # for one, prints the database password.
+    LOOKS = ["ps -a --no-trunc --filter name=dewey-db --format {{.Names}} {{.State}} {{.Mounts}}",
+             "volume ls --filter name=dewey-db-data --format {{.Name}}"]
+
+    def docker_on_path(self, containers="", volumes="", answers=True):
+        """Put a stand-in `docker` on the wizard's PATH (the real one is never reachable from it).
+
+        It notes every call, answers `docker ps` and `docker volume` with the text given here (one
+        line per container: its names, state and mounts; one volume name per line) and fails for
+        anything else. answers=False plays a Docker that is installed but not running. Shell
+        builtins only: the wizard's PATH holds nothing else.
+        """
         self.docker_calls = self.root / "docker-was-run"
+        self.assertNotIn("'", containers + volumes)  # they go into the stub inside single quotes
+        if answers:
+            reply = ('case "$1" in\n'
+                     f"  ps) printf '%s' '{containers}' ;;\n"
+                     f"  volume) printf '%s' '{volumes}' ;;\n"
+                     "  *) exit 64 ;;\n"
+                     "esac\n")
+        else:
+            reply = 'echo "Cannot connect to the Docker daemon. Is the docker daemon running?" >&2\nexit 1\n'
         stub = self.root / "bin" / "docker"
-        stub.write_text(f'#!/bin/sh\necho "$@" >> "{self.docker_calls}"\n')
+        stub.write_text(f'#!/bin/sh\necho "$*" >> "{self.docker_calls}"\n{reply}')
         stub.chmod(0o755)
+
+    def docker_calls_made(self):
+        """The arguments of every call the wizard made to the stand-in docker, one per line."""
+        return self.docker_calls.read_text().splitlines() if self.docker_calls.exists() else []
+
+    def printed_password(self, out):
+        """The password in the one docker run command the wizard printed."""
+        found = re.findall(r"-e POSTGRES_PASSWORD=(\S+) ", out)
+        self.assertEqual(len(found), 1, out)
+        return found[0]
 
     def env_value(self, key):
         """The value .env holds for key, or None if it isn't there."""
@@ -493,14 +665,22 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn("-e POSTGRES_USER=dewey -e POSTGRES_DB=dewey", out)
         self.assertIn(f"-e POSTGRES_PASSWORD={password} ", out)
         self.assertIn("-p 127.0.0.1:5432:5432 pgvector/pgvector:pg18", out)
+        # The database comes back when Docker restarts, and its files outlive the container (#18).
+        # /var/lib/postgresql exactly: Postgres 18 images refuse a new database mounted at .../data.
+        self.assertIn("docker run -d --name dewey-db --restart unless-stopped ", out)
+        self.assertIn("-v dewey-db-data:/var/lib/postgresql ", out)
+        self.assertNotIn("/var/lib/postgresql/data", out)
+        self.assertIn("docker start dewey-db", out)  # how to start it again
+        self.assertIn("separate from the db service in docker-compose.yml", out)
         # That command is the only place the password is shown; the Summary masks it.
         self.assertEqual(out.count(password), 1, out)
         summary = out.split("Summary", 1)[1]
         self.assertIn("POSTGRES_PASSWORD='********'", summary)
         self.assertIn("DATABASE_URL='********'", summary)
-        self.assertFalse(self.docker_calls.exists(), "the wizard prints the command; it must not run Docker")
+        # The wizard looked at Docker, and that is all: the person runs the command, not the wizard.
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
 
-    def test_docker_is_the_suggested_answer_and_saying_it_is_not_running_writes_no_database(self):
+    def test_docker_is_the_suggested_answer_and_answering_no_keeps_the_password_but_writes_no_database_url(self):
         self.docker_on_path()
         out, status = self.wizard(
             # Enter takes the suggested answer: docker, when Docker is installed and no URL is saved.
@@ -511,9 +691,12 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn("start it whenever you like, then re-run this wizard", out)
         self.assertIn("Still missing: DATABASE_URL", out)
         self.assertIsNone(self.env_value("DATABASE_URL"))
-        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        # Docker showed that no dewey-db exists, so the printed command will make one with this
+        # password whenever it is run: it is kept, and the next run prints the same command (#18).
+        self.assertRegex(self.env_value("POSTGRES_PASSWORD") or "", r"^[0-9a-f]{24}$")
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), self.printed_password(out))
         self.assertEqual(self.env_value("DEWEY_STACK"), "open")  # everything else was still written
-        self.assertFalse(self.docker_calls.exists())
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
 
     def test_docker_is_not_offered_when_it_is_not_installed(self):
         out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
@@ -533,6 +716,155 @@ class WizardImportTests(unittest.TestCase):
         self.assertNotIn("s3cretPW9", out)
         self.assertIn("DATABASE_URL='********'", out.split("Summary", 1)[1])
         self.assertNotIn("Still missing", out)
+
+    # --- re-runs of the Docker choice (issue #18): a database keeps the password it was created
+    # with, so the wizard must never pair an existing dewey-db with a password made up later.
+
+    SEED = "0123456789abcdef01234567"  # a password already in .env, the shape the wizard makes
+    KEEP_TOKEN = [("Keep the existing MCP token", "")]  # asked on a re-run, after the newsroom questions
+
+    def docker_url(self, password):
+        return f"postgresql://dewey:{password}@127.0.0.1:5432/dewey"
+
+    def test_a_rerun_after_no_prints_the_same_command_and_then_saves_the_database_url(self):
+        self.docker_on_path()
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, ""), ("Is it running", "n"))
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        password = self.printed_password(out)
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), password)
+        # Second run, Docker still shows nothing: the same command, now with a warning that it
+        # shows a saved password. Enter still suggests docker, because no address is saved yet.
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, ""), ("Is it running", "y"))
+            + self.KEEP_TOKEN + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.printed_password(out), password)
+        self.assertIn("The command below shows the database password saved in .env", out)
+        self.assertEqual(self.env_value("DATABASE_URL"), self.docker_url(password))
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), password)
+        self.assertEqual((self.root / ".env").read_text().count("POSTGRES_PASSWORD="), 1)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS * 2)
+
+    def test_a_stopped_container_with_a_saved_password_is_started_not_recreated(self):
+        (self.root / ".env").write_text(f"POSTGRES_PASSWORD='{self.SEED}'\n")
+        self.docker_on_path(containers="dewey-db exited dewey-db-data\n", volumes="dewey-db-data\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Is it running", "y"))
+            + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("docker start dewey-db", out)
+        self.assertNotIn("docker run", out)  # it would fail on the name, and its password would be wrong
+        self.assertNotIn(self.SEED, out)
+        self.assertEqual(self.env_value("DATABASE_URL"), self.docker_url(self.SEED))
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), self.SEED)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
+
+    def test_a_running_container_with_a_saved_password_is_used_without_a_question(self):
+        (self.root / ".env").write_text(f"POSTGRES_PASSWORD='{self.SEED}'\n")
+        # No dewey-db-data among its mounts: a container made by the earlier command, like the ones
+        # people already have. --filter name= also lists dewey-db-old; only the exact name counts.
+        self.docker_on_path(containers="dewey-db-old exited x\ndewey-db running " + "5f2b" * 16 + "\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"))  # no "Is it running?": Docker said so
+            + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("docker run", out)
+        self.assertNotIn("Is it running", out)
+        self.assertNotIn(self.SEED, out)
+        self.assertIn("docker update --restart unless-stopped dewey-db", out)
+        self.assertIn("docker start dewey-db", out)
+        self.assertIn('"An older dewey-db" in docs/INSTALL.md', out)
+        self.assertEqual(self.env_value("DATABASE_URL"), self.docker_url(self.SEED))
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), self.SEED)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
+
+    def test_an_existing_container_without_a_saved_password_is_never_given_a_new_one(self):
+        # The issue's case: a dewey-db started after answering No to an earlier version of the wizard,
+        # which kept no password. Today's run must not invent one for it.
+        self.docker_on_path(containers="dewey-db running " + "5f2b" * 16 + "\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Database URL", ""))  # Enter: not known
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("no saved password", out)
+        self.assertIn('"The database container already exists" in docs/INSTALL.md', out)
+        # No dewey-db-data among its mounts: the wizard says here too that it is the older kind, in
+        # the words the guide quotes, so that nobody takes it for one whose files outlive it.
+        self.assertIn("doesn't use the volume dewey-db-data", out)
+        self.assertIn('"An older dewey-db" in docs/INSTALL.md', out)
+        self.assertNotIn("docker run", out)
+        self.assertNotIn("docker rm", out)  # removal commands are in the guide, after its warning
+        self.assertNotIn("Is it running", out)
+        self.assertIn("Still missing: DATABASE_URL", out)
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
+
+    def test_when_docker_does_not_answer_the_wizard_says_so_and_saves_nothing_after_enter(self):
+        self.docker_on_path(answers=False)
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"),
+                                       ("Start Docker, then look again", ""),  # Enter: yes, look again
+                                       ("Is it running", ""))                  # Enter: no, here
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("Docker didn't answer", out)
+        self.assertIn("Docker still didn't answer", out)
+        self.assertIn("docker run -d --name dewey-db --restart unless-stopped ", out)
+        self.assertIn("already in use", out)
+        self.assertIn("(y/N)", out.split("Is it running", 1)[1].split("\n", 1)[0])
+        self.assertIn("isn't saved", out)
+        self.assertIn("Still missing: DATABASE_URL", out)
+        # Nothing about the database is kept: a password no container may ever get must not be
+        # found in .env by the next run and taken for the database's.
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        password = self.printed_password(out)
+        self.assertEqual(out.count(password), 1, out)
+        self.assertNotIn(password, (self.root / ".env").read_text())
+        # The second listing is only asked for once the first one answered.
+        self.assertEqual(self.docker_calls_made(), self.LOOKS[:1] * 2)
+
+    def test_a_password_made_while_docker_was_silent_is_not_trusted_by_the_next_run(self):
+        # Run 1: Docker isn't answering. The person declines to look again and answers n, as the
+        # wizard advises when Docker reports the name dewey-db as taken.
+        self.docker_on_path(answers=False)
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Start Docker, then look again", "n"),
+                                       ("Is it running", "n"))
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        first_password = self.printed_password(out)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS[:1])
+        # Run 2: Docker answers, and shows the database that held the name all along.
+        self.docker_on_path(containers="dewey-db running " + "5f2b" * 16 + "\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, ""), ("Database URL", ""))
+            + self.KEEP_TOKEN + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("no saved password", out)
+        self.assertNotIn("docker run", out)
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        self.assert_nowhere(first_password, out)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS[:1] + self.LOOKS)
+
+    def test_a_dry_run_never_asks_docker_and_shows_no_password(self):
+        (self.root / ".env").write_text(f"POSTGRES_PASSWORD='{self.SEED}'\n")
+        self.docker_on_path(containers="dewey-db running dewey-db-data\n", volumes="dewey-db-data\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"))  # no question follows the command
+            + [(self.WHERE, "skip")], "--dry-run")
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.docker_calls_made(), [])
+        self.assertIn("--dry-run", out.split("Do you have a Postgres database", 1)[1].split("Newsroom", 1)[0])
+        self.assertIn("-e POSTGRES_PASSWORD=PASSWORD ", out)
+        self.assertNotIn(self.SEED, out)
+        self.assertNotIn("Is it running", out)
+        self.assertIn("nothing was written", out)
+        self.assertEqual((self.root / ".env").read_text(), f"POSTGRES_PASSWORD='{self.SEED}'\n")
 
 
 if __name__ == "__main__":
