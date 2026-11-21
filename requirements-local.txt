@@ -1,6 +1,6 @@
 # Optional: open-weight embedding and reranking models run on this machine
 # (EMBEDDING_PROVIDER=local and/or RERANK_PROVIDER=local, the defaults for DEWEY_STACK=open).
 # Install on top of requirements.txt:  pip install -r requirements-local.txt
-# This pulls in PyTorch, a large download (CPU builds are smaller; see README).
+# This pulls in PyTorch, a large download (CPU builds are smaller; see docs/STACKS.md).
 voyageai[local]==0.6.0
 sentence-transformers==5.7.0

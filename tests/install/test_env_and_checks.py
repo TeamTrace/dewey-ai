@@ -30,7 +30,7 @@ install = load_install()
 
 
 class SummaryMaskingTests(unittest.TestCase):
-    """README promises the dry run prints the .env 'with secrets masked'."""
+    """docs/INSTALL.md promises the dry run prints the .env 'with secrets masked'."""
 
     OLD_ENV = "\n".join([
         "DEWEY_STACK='anthropic'",

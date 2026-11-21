@@ -81,8 +81,10 @@ examples:
   python app/import_archive.py wordpress-api --site https://www.example.com --limit 20
   python app/import_archive.py wordpress-api --site https://www.example.com \\
       --after 2023-01-01 --before 2024-01-01
+  To include private posts, sign in. After the read line, paste the
+  Application Password and press Enter. Nothing is shown or saved.
   export {USER_ENV}=editor
-  read -rs {PASSWORD_ENV} && export {PASSWORD_ENV}   # paste it; not shown or saved
+  read -rs {PASSWORD_ENV} && export {PASSWORD_ENV}
   python app/import_archive.py wordpress-api --site https://www.example.com --include-private
 """
 

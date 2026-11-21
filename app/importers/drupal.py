@@ -107,8 +107,10 @@ examples:
       --type article --type story --byline-field field_authors
   python app/import_archive.py drupal --site https://www.example.com \\
       --api-url https://cms.example.com/jsonapi --body-field field_paragraphs
+  If JSON:API needs a login, sign in. After the read line, type the
+  password and press Enter. Nothing is shown or saved.
   export {USER_ENV}=dewey-reader
-  read -rs {PASSWORD_ENV} && export {PASSWORD_ENV}   # type it; not shown or saved
+  read -rs {PASSWORD_ENV} && export {PASSWORD_ENV}
   python app/import_archive.py drupal --site https://www.example.com
 """
 
