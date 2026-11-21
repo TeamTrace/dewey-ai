@@ -435,5 +435,90 @@ class WizardImportTests(unittest.TestCase):
         self.assertNotIn(token, out)
 
 
+    # --- the Postgres question (issue #5: none of its three answers but "later" had ever run in a test)
+
+    POSTGRES = r"Do you have a Postgres database[\s\S]*?Choose a number or name"
+    # With DATABASE_URL set nothing is missing on this stack, so the wizard offers to check
+    # the services. "n" keeps the test offline: "y" would try Ollama and Postgres on localhost.
+    NO_CHECKS = [("Check your credentials and services now", "n")]
+
+    def with_postgres_answers(self, *steps):
+        """OPEN_STACK with the Postgres question answered by `steps` instead of "later"."""
+        at = next(i for i, (_, answer) in enumerate(self.OPEN_STACK) if answer == "later")
+        return self.OPEN_STACK[:at] + list(steps) + self.OPEN_STACK[at + 1:]
+
+    def docker_on_path(self):
+        """Make Docker look installed. The wizard only checks that the command exists; if it ever
+        ran it, the stub would leave a note."""
+        self.docker_calls = self.root / "docker-was-run"
+        stub = self.root / "bin" / "docker"
+        stub.write_text(f'#!/bin/sh\necho "$@" >> "{self.docker_calls}"\n')
+        stub.chmod(0o755)
+
+    def env_value(self, key):
+        """The value .env holds for key, or None if it isn't there."""
+        for line in (self.root / ".env").read_text().splitlines():
+            if line.startswith(f"{key}="):
+                value = line.split("=", 1)[1]
+                self.assertRegex(value, r"^'[^']*'$", line)  # written single-quoted, as install.py does
+                return value[1:-1]
+        return None
+
+    def test_docker_database_writes_one_password_everywhere(self):
+        self.docker_on_path()
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Is it running", "y"))
+            + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        password = self.env_value("POSTGRES_PASSWORD")
+        self.assertRegex(password or "", r"^[0-9a-f]{24}$")
+        self.assertEqual(self.env_value("DATABASE_URL"), f"postgresql://dewey:{password}@127.0.0.1:5432/dewey")
+        # The command to paste uses the same password, user and database, on loopback only.
+        self.assertIn("docker run -d --name ", out)
+        self.assertIn("-e POSTGRES_USER=dewey -e POSTGRES_DB=dewey", out)
+        self.assertIn(f"-e POSTGRES_PASSWORD={password} ", out)
+        self.assertIn("-p 127.0.0.1:5432:5432 pgvector/pgvector:pg18", out)
+        # That command is the only place the password is shown; the Summary masks it.
+        self.assertEqual(out.count(password), 1, out)
+        summary = out.split("Summary", 1)[1]
+        self.assertIn("POSTGRES_PASSWORD='********'", summary)
+        self.assertIn("DATABASE_URL='********'", summary)
+        self.assertFalse(self.docker_calls.exists(), "the wizard prints the command; it must not run Docker")
+
+    def test_docker_is_the_suggested_answer_and_saying_it_is_not_running_writes_no_database(self):
+        self.docker_on_path()
+        out, status = self.wizard(
+            # Enter takes the suggested answer: docker, when Docker is installed and no URL is saved.
+            self.with_postgres_answers((self.POSTGRES, ""), ("Is it running", "n"))
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("docker run -d --name ", out)
+        self.assertIn("start it whenever you like, then re-run this wizard", out)
+        self.assertIn("Still missing: DATABASE_URL", out)
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        self.assertEqual(self.env_value("DEWEY_STACK"), "open")  # everything else was still written
+        self.assertFalse(self.docker_calls.exists())
+
+    def test_docker_is_not_offered_when_it_is_not_installed(self):
+        out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        question = out.split("Do you have a Postgres database", 1)[1].split("Choose a number or name", 1)[0]
+        self.assertNotIn("docker", question.lower())
+
+    def test_an_existing_database_url_is_typed_hidden_and_saved(self):
+        url = "postgresql://dewey:s3cretPW9@db.example.org:5432/archive"
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "yes"), ("Database URL", url))
+            + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.env_value("DATABASE_URL"), url)
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        self.assertNotIn(url, out)
+        self.assertNotIn("s3cretPW9", out)
+        self.assertIn("DATABASE_URL='********'", out.split("Summary", 1)[1])
+        self.assertNotIn("Still missing", out)
+
+
 if __name__ == "__main__":
     unittest.main()
