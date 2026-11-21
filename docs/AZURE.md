@@ -101,7 +101,7 @@ All checked November 2026. Microsoft's Azure documentation is no longer public o
 The setup wizard writes Dewey's settings to a [`.env` file](GLOSSARY.md#env-file) in the Dewey folder, or you write it by hand.
 
 > [!WARNING]
-> Fill in the newsroom details on either path. Left blank, Dewey's prompts assume The Philadelphia Inquirer's archive, starting January 2, 1978, and questions about the Greater Philadelphia Region. Dewey also gives that name to your AI tool when it describes its tools.
+> Fill in the newsroom name on either path: it is required, and Dewey gives that name to your AI tool when it describes its tools. The earliest date and the region are optional: left blank, Dewey states no start date and assumes no region.
 
 ### With the setup wizard
 

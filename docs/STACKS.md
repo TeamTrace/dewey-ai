@@ -813,7 +813,7 @@ notepad .env
 </details>
 
 > [!WARNING]
-> **Set the newsroom details, or Dewey describes your archive as The Philadelphia Inquirer's.** Without them, Dewey's prompts assume the Inquirer, an archive starting January 2, 1978, and the Greater Philadelphia Region. On the Postgres setups, articles indexed without a `publisher` field are labelled "The Philadelphia Inquirer" in answers and results. If you already indexed, fix `.env` and run the indexer again to replace the label.
+> **Set the newsroom name: Dewey won't run without it.** `NEWSROOM_NAME` has no default: the indexer, the MCP server and the demo page stop with an error until it is set. Without `ARCHIVE_START_DATE` Dewey states no start date, and without `DEFAULT_REGION` it assumes no region. On the Postgres setups, articles indexed without a `publisher` field are labelled with `NEWSROOM_NAME` in answers and results. Earlier versions used "The Philadelphia Inquirer" when the name was missing: if you indexed that way, set the name and run the indexer again to replace the label.
 
 5. **Set the newsroom details.** Add these lines to `.env` in a text editor (not in a terminal):
 

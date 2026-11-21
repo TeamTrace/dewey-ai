@@ -107,7 +107,7 @@ Six steps get Dewey running on one computer. If any of this is new to you, follo
    Your prompt now starts with `(.venv)`. Turn it on again in every new terminal window ([how](docs/INSTALL.md#turn-it-on-in-every-new-terminal-window)).
 
 > [!WARNING]
-> Type your newsroom's details when the wizard asks. Left blank, they default to The Philadelphia Inquirer's, and Dewey presents your articles to journalists as the Inquirer's.
+> Type your newsroom's name when the wizard asks: it is required. Dewey labels your articles with it and tells AI tools whose archive this is. The earliest date and the region can be left blank: Dewey then states no start date and assumes no region.
 
 5. **Run the setup wizard.** Not sure which setup to choose? [Compare the setups](docs/STACKS.md#the-setups-at-a-glance) first. On every computer:
    ```bash

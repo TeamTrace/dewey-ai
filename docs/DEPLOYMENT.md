@@ -301,11 +301,11 @@ Dewey runs inside Docker, so you don't need a virtual environment there.
    - Compose ignores `DATABASE_URL` in `.env` and points Dewey at its own `db` service.
    - Compose reads `.env` [its own way](https://github.com/compose-spec/compose-spec/blob/main/spec.md): only single-quoted values, as `install.py` writes them, are literal. So avoid `$` outside single quotes, and backslashes.
 
-> [!WARNING]
-> **Set the three newsroom settings before you index.**
-> Without them, Dewey uses its original newsroom's defaults: The Philadelphia Inquirer, articles from January 2, 1978, and the Greater Philadelphia Region.
-> Every article without a [publisher](GLOSSARY.md#publisher) is then labelled as the Inquirer's, and the MCP server tells every AI tool it's the Inquirer's archive.
-> To fix it later, correct `.env`, restart the server (step 4) and index again.
+> [!IMPORTANT]
+> **Set the newsroom settings before you index.**
+> `NEWSROOM_NAME` is required: without it the indexer and the MCP server stop with an error. Without `ARCHIVE_START_DATE` Dewey states no start date, and without `DEFAULT_REGION` it assumes no region.
+> Every article without a [publisher](GLOSSARY.md#publisher) is labelled with `NEWSROOM_NAME`, and the MCP server tells every AI tool whose archive it is.
+> To change it later, correct `.env`, restart the server (step 4) and index again.
 
 4. **Start the MCP server and Postgres.**
    The first time, this builds Dewey's image, so it takes a while:
