@@ -367,8 +367,9 @@ class PythonSituation:
     in_root: bool             # the terminal's current folder is the Dewey folder
     venv: str                 # the virtual environment this Python belongs to; "" when none
     in_dewey_venv: bool       # that environment is the Dewey folder's .venv
-    dewey_venv_exists: bool   # the Dewey folder has a .venv with a Python in it
+    dewey_venv_exists: bool   # the Dewey folder has a .venv that works: it has its Python, and is where it was made
     dewey_venv_broken: bool = False  # it has a .venv folder that is not a working environment
+    dewey_venv_moved: bool = False   # ...because the Dewey folder was renamed or moved after it was made
 
     @property
     def dewey_venv_is_off(self) -> bool:
@@ -406,6 +407,72 @@ def _is_there(path: Path) -> bool:
         return False
 
 
+# The line of a virtual environment's bin/activate that records the folder it was made in:
+# VIRTUAL_ENV="FOLDER" (Python 3.9.6), export VIRTUAL_ENV="FOLDER" (3.12.6), or
+# export VIRTUAL_ENV=FOLDER with quotes only where a shell needs them (3.13.9 to 3.15.2).
+# uv 0.13.9 writes VIRTUAL_ENV='FOLDER'. Those are the ones looked at, in November 2026.
+_ACTIVATE_FOLDER = re.compile(r"^[ \t]*(?:export[ \t]+)?VIRTUAL_ENV=(.+)$", re.MULTILINE)
+
+
+def _same_folder(written: str, folder: Path) -> bool:
+    """Whether the folder an activate script wrote down is `folder`: itself, or another name for
+    it (a link, another spelling). A folder that is no longer there is not. When it can't be
+    told, the answer is yes."""
+    if written == str(folder):
+        return True
+    try:
+        return os.path.samefile(written, str(folder))
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def venv_was_moved(venv: Path) -> bool:
+    """True when a virtual environment's own activate script says it was made in another folder
+    than the one it is in now: that folder, or one above it, was renamed, moved or copied since.
+
+    Such an environment can't be turned on. Its bin/activate puts the folder it was made in on
+    the PATH, so `python` is then not found, or is some other Python, and this wizard would
+    call the environment "not turned on" every time. Python's guide says what to do
+    (Doc/library/venv.rst: "If you move an environment because you moved a parent directory of
+    it, you should recreate the environment in its new location"). Making it again without
+    --clear is not a repair to print: the commands installed in it, pip among them, go on
+    naming the old folder, and with another Python than it was made with it can end up unable
+    to start (seen on a Mac in November 2026: the first with each Python from 3.9 to 3.15, the
+    second with an environment made by 3.13 and made again by 3.12).
+
+    The script is read, never run. False when it is missing, when it names the folder it is in
+    (however that is quoted), or when it says nothing this function is sure of: a folder that
+    is worked out when the script runs, or one with a $ or a backquote in its name. So only an
+    environment's own word gets it made again. Not looked at on Windows, where this wizard and
+    the guide turn an environment on with Activate.ps1: that script works out where it is each
+    time it runs (read in the copies that come with Python 3.9, 3.12 and 3.13; not tried on
+    Windows).
+    """
+    if os.name == "nt":
+        return False
+    try:
+        script = (venv / "bin" / "activate").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    here = str(venv)
+    for spelling in (here, shlex.quote(here)):  # as it is (Python 3.12 and older), or quoted for a shell
+        if re.search(r"(?<![^\s=\"'(])" + re.escape(spelling) + r"(?![^\s\"');])", script):
+            return False
+    made_in = []
+    for value in _ACTIVATE_FOLDER.findall(script):
+        if "$" in value or "`" in value:
+            continue
+        try:
+            words = shlex.split(value)
+        except ValueError:
+            continue
+        if len(words) == 1:
+            made_in.append(words[0])
+    return bool(made_in) and not any(_same_folder(written, venv) for written in made_in)
+
+
 def python_situation() -> PythonSituation:
     """This computer's PythonSituation."""
     venv = Path(sys.prefix).resolve() if in_virtualenv() else None
@@ -419,10 +486,15 @@ def python_situation() -> PythonSituation:
     # it was made with has been uninstalled) "turn it on" would lead nowhere, and it has to be
     # made again with --clear: without that, venv keeps the dead links already in the folder.
     works = in_dewey_venv or (_is_there(dewey_venv / "pyvenv.cfg") and _is_there(venv_python()))
+    # Nor can it be turned on after the Dewey folder was renamed or moved. The environment this
+    # wizard is running in is not asked: its Python works, whatever its scripts say.
+    moved = works and not in_dewey_venv and venv_was_moved(dewey_venv)
+    works = works and not moved
     return PythonSituation(
         system="windows" if os.name == "nt" else ("mac" if sys.platform == "darwin" else "linux"),
         root=str(ROOT), in_root=in_root, venv=str(venv) if venv else "", in_dewey_venv=in_dewey_venv,
-        dewey_venv_exists=works, dewey_venv_broken=not works and os.path.lexists(str(dewey_venv)))
+        dewey_venv_exists=works, dewey_venv_broken=not works and os.path.lexists(str(dewey_venv)),
+        dewey_venv_moved=moved)
 
 
 def _dotted(version) -> str:
@@ -447,7 +519,8 @@ def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_
     make nothing again (not even when another project's environment is the one turned on).
     Otherwise, outside any environment: make one, with --clear if a .venv folder is there but
     is not a working environment. Inside one whose Python isn't one Dewey is tested with: make
-    it again, at its own path (inside one that is fine there is nothing to make or turn on).
+    it again, at its own path (inside one that is fine there is nothing to make or turn on),
+    unless the Dewey folder has a .venv folder of its own: then that is the one made again.
     `cd` to the Dewey folder comes first when the terminal is somewhere else, or when `cd_first`
     says the commands may be typed later, in another window: they are relative, and
     `--clear .venv` in the wrong folder would empty another project's environment.
@@ -467,8 +540,11 @@ def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_
     tested = python_verdict(running) == "ok"
     use = _dotted(running if tested else TESTED_PYTHON)
     python = f"py -{use}" if windows else f"python{use}"
-    # An environment in another folder is made again only when the Dewey folder has none of its own.
-    elsewhere = bool(where.venv) and not where.in_dewey_venv and not where.dewey_venv_is_off
+    # An environment in another folder is made again only when the Dewey folder has no .venv folder
+    # of its own, working or not: nobody who left another project's environment turned on is sent
+    # to empty it while Dewey's own is the one that needs attention.
+    elsewhere = (bool(where.venv) and not where.in_dewey_venv and not where.dewey_venv_is_off
+                 and not where.dewey_venv_broken)
     if not elsewhere:
         folder = ".venv"
         activate = ".venv\\Scripts\\Activate.ps1" if windows else "source .venv/bin/activate"
@@ -520,6 +596,26 @@ def python_reason(verdict: str, version) -> List[str]:
             "Troubleshooting in docs/INSTALL.md."]
 
 
+# Printed under steps that turn on a .venv this wizard takes to be a working one. It cannot see
+# everything that stops one from being turned on (on Windows, for one, an environment keeps its
+# own python.exe after the Python it was made with is uninstalled; not tried there), and without
+# these lines it would only ever say "not turned on" again. Plain words, like the steps: they
+# come after commands.
+IF_TURNING_ON_FAILS = ["If that says python is not found, or you see this message again, make the environment again:",
+                       "Recreate the virtual environment, under Troubleshooting in docs/INSTALL.md."]
+
+
+def remake_reason(where: PythonSituation) -> List[str]:
+    """Why the Dewey folder's .venv has to be made again, for a .venv that is not a working
+    virtual environment. Printed above the commands, so it may use any punctuation."""
+    if where.dewey_venv_moved:
+        return ["The Dewey folder has a virtual environment (the .venv folder), but it was made before the",
+                "Dewey folder was renamed or moved, and it does not work from the new place. It has to be made",
+                "again. That removes the packages in it: this wizard installs them again when you run it there."]
+    return ["The Dewey folder has a .venv folder, but it is not a working virtual environment,",
+            "so it has to be made again."]
+
+
 def switch_python_lines(where: PythonSituation, version=None) -> List[str]:
     """What to do about a Python that can't run Dewey, by where that Python lives. The commands
     come from environment_steps(), and the lines follow its conventions."""
@@ -534,18 +630,19 @@ def switch_python_lines(where: PythonSituation, version=None) -> List[str]:
                  "not turned on in this terminal window. "
                  + ("In PowerShell, run these one at a time:" if windows else "Run these one at a time:")]
                 + environment_steps(where, version)
-                + ["If the wizard stops again, it will show how to make the environment again."])
+                + IF_TURNING_ON_FAILS)
     lines: List[str] = []
     if where.in_dewey_venv:
         lines += ["This Python is the one in Dewey's virtual environment (the .venv folder), so installing another",
                   "Python is not enough: the environment has to be made again with it.", ""]
+    elif where.dewey_venv_broken:
+        # Before the next case: with another project's environment turned on as well, the one to
+        # make again is still Dewey's own, and environment_steps() gives the commands for it.
+        lines += remake_reason(where) + [""]
     elif where.venv:
         lines += ["This Python belongs to a virtual environment in",
                   f"  {where.venv}",
                   "so installing another Python is not enough: that environment has to be made again with it.", ""]
-    elif where.dewey_venv_broken:
-        lines += ["The Dewey folder has a .venv folder, but it is not a working virtual environment,",
-                  "so it has to be made again.", ""]
     if where.system == "linux":
         lines += [f"If no Python from {_dotted(MIN_PYTHON)} to {best} is installed yet, install one first with your "
                   "package manager:",
@@ -1267,12 +1364,18 @@ def install_dependencies(values: dict) -> None:
         if where.dewey_venv_exists:
             say("You're not in a virtual environment. The Dewey folder has one, the .venv folder, but it is")
             say("not turned on in this terminal window. To turn it on and run this wizard in it:")
+        elif where.dewey_venv_moved:
+            say("You're not in a virtual environment. The Dewey folder has one, the .venv folder, but it was made")
+            say("before the Dewey folder was renamed or moved, and it does not work from the new place. To make it")
+            say("again and run this wizard in it, which installs the packages again:")
         elif where.dewey_venv_broken:
             say("You're not in a virtual environment. The Dewey folder has a .venv folder, but it is")
             say("not a working virtual environment. To make it again and run this wizard in it:")
         else:
             say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
         say_lines(environment_steps(where))
+        if where.dewey_venv_exists:
+            say_lines(IF_TURNING_ON_FAILS)
         if not ask_yes("Install into the current Python anyway?", default=False):
             say_packages_state(values)
             return
@@ -2411,7 +2514,8 @@ def ask_mcp(cur: dict) -> dict:
     say("chat apps (Open WebUI, LibreChat) search your archive. Over HTTP it requires a secret token,")
     say("which is stored in .env and never printed here.")
     # Say what this run did with the token, in the future tense for saving: nothing is written
-    # until "Write this to .env?", and nothing at all with --dry-run. The token is never printed.
+    # until "Write this to .env?", and nothing at all with --dry-run. This step does not know
+    # which kind of run it is in, so the text says both. The token is never printed.
     existing = cur.get("DEWEY_MCP_TOKEN", "")
     usable = len(existing) >= MCP_MIN_TOKEN_CHARS
     if usable:
@@ -2424,10 +2528,11 @@ def ask_mcp(cur: dict) -> dict:
         say("  so this run made a new one to replace it.")
     else:
         say("  This run made a new token.")
-    say("  It will be saved in .env with your other answers, as DEWEY_MCP_TOKEN, and is never shown on screen.")
+    say("  It will be saved in .env with your other answers when you confirm at the end (never with --dry-run),")
+    say("  as DEWEY_MCP_TOKEN, and is never shown on screen.")
     if existing:
         # A token the server refused never worked, so only a usable one can "stop working".
-        say("  Afterwards, restart the MCP server if it runs over HTTP, and give each AI tool that connects")
+        say("  Once it is saved, restart the MCP server if it runs over HTTP, and give each AI tool that connects")
         say("  over HTTP the new value" + (": the old one stops working" if usable else "")
             + " (docs/MCP.md, under Security).")
     else:

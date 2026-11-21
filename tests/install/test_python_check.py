@@ -20,6 +20,7 @@ import io
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,20 +47,23 @@ ROOTS = {"mac": "/Users/you/dewey-ai", "linux": "/home/you/dewey-ai", "windows":
 OLD, UNTESTED, NEW = (3, 9, 6), (3, 14, 10), (3, 15, 2)
 
 
-def computer(system="mac", lives="none", in_root=True, root=None, own_venv=False):
+def computer(system="mac", lives="none", in_root=True, root=None, own_venv=False, own_broken=False):
     """A described computer. `lives` says where the Python running the wizard is:
     "dewey" (the Dewey folder's .venv), "off" (outside any environment, and the Dewey folder has
     a .venv that isn't turned on), "broken" (outside, and the Dewey folder's .venv is not a working
-    environment: its Python is gone), "none" (outside, and there is no .venv yet), or the folder
-    of a virtual environment somewhere else. With `own_venv`, the Dewey folder has a working .venv
-    as well as that other environment."""
+    environment: its Python is gone), "moved" (outside, and its .venv was made before the Dewey
+    folder was renamed or moved, so it does not work where it is now), "none" (outside, and there
+    is no .venv yet), or the folder of a virtual environment somewhere else. With `own_venv`, the
+    Dewey folder has a working .venv as well as that other environment; with `own_broken`, a
+    .venv that is not a working one."""
     root = root or ROOTS[system]
     sep = "\\" if system == "windows" else "/"
-    venv = {"none": "", "off": "", "broken": "", "dewey": root + sep + ".venv"}.get(lives, lives)
+    venv = {"none": "", "off": "", "broken": "", "moved": "", "dewey": root + sep + ".venv"}.get(lives, lives)
     return install.PythonSituation(system=system, root=root, in_root=in_root, venv=venv,
                                    in_dewey_venv=lives == "dewey",
                                    dewey_venv_exists=own_venv or lives in ("off", "dewey"),
-                                   dewey_venv_broken=lives == "broken")
+                                   dewey_venv_broken=own_broken or lives in ("broken", "moved"),
+                                   dewey_venv_moved=lives == "moved")
 
 
 OTHER_PROJECT = "/home/you/other-project/.venv"   # another project's environment, left turned on
@@ -156,6 +160,38 @@ class EnvironmentStepsTests(unittest.TestCase):
                 before_clear = lines[[line.strip() for line in lines].index(f"{python} -m venv --clear .venv") - 1]
                 self.assertIn("deletes what is in .venv", before_clear)
 
+    def test_a_dot_venv_made_before_the_folder_was_renamed_is_made_again_with_clear(self):
+        # It can't be turned on where it is now, and Python's advice is to make it again there.
+        # Not without --clear: its installed commands would keep naming the old folder, and a
+        # Python other than the one it was made with can leave it unable to start.
+        for system in ("mac", "linux"):
+            for version in (OLD, UNTESTED, NEW):
+                with self.subTest(system=system, version=version):
+                    lines = install.environment_steps(computer(system, "moved"), version)
+                    self.assertEqual(commands(lines), ["python3.13 -m venv --clear .venv", "source .venv/bin/activate",
+                                                       "python install.py"])
+                    self.assertIn("deletes what is in .venv", "\n".join(lines))
+        # A Python Dewey is tested with is named, as for any environment that is made here.
+        self.assertEqual(commands(install.environment_steps(computer("linux", "moved"), (3, 12, 3)))[0],
+                         "python3.12 -m venv --clear .venv")
+
+    def test_another_environment_is_on_and_the_dewey_folders_own_is_not_working(self):
+        # Another project's environment was left turned on, and the Dewey folder's .venv has to
+        # be made again: the commands are for Dewey's own folder, never for the other project's.
+        for where in (computer("linux", OTHER_PROJECT, own_broken=True),
+                      computer("linux", OTHER_PROJECT, own_broken=True, in_root=False)):
+            for version in (OLD, NEW):
+                with self.subTest(where=where, version=version):
+                    lines = install.environment_steps(where, version)
+                    self.assertEqual(commands(lines)[-3:], ["python3.13 -m venv --clear .venv",
+                                                            "source .venv/bin/activate", "python install.py"])
+                    text = "\n".join(lines)
+                    self.assertNotIn("other-project", text)
+                    self.assertIn("deletes what is in .venv", text)
+        windows = install.environment_steps(computer("windows", "C:\\Users\\you\\other\\.venv", own_broken=True), OLD)
+        self.assertEqual(commands(windows), ["py -3.13 -m venv --clear .venv", ".venv\\Scripts\\Activate.ps1",
+                                             "python install.py"])
+
     def test_another_environment_is_on_and_the_dewey_folder_has_its_own(self):
         # Another project's environment was left turned on. The answer is to turn Dewey's on,
         # never a command that empties the other project's.
@@ -248,7 +284,7 @@ class EnvironmentStepsTests(unittest.TestCase):
     def test_cd_comes_first_when_the_terminal_is_somewhere_else(self):
         # The other commands are relative: `--clear .venv` in another folder would empty that
         # folder's environment.
-        for lives in ("none", "off", "broken", "dewey", "/home/you/envs/dewey"):
+        for lives in ("none", "off", "broken", "moved", "dewey", "/home/you/envs/dewey"):
             with self.subTest(lives=lives):
                 away = install.environment_steps(computer("linux", lives, in_root=False), OLD)
                 self.assertEqual(commands(away)[0], "cd /home/you/dewey-ai")
@@ -265,7 +301,7 @@ class EnvironmentStepsTests(unittest.TestCase):
 
     def test_every_command_is_on_its_own_line_under_a_line_that_says_what_it_does(self):
         for system in ("mac", "linux", "windows"):
-            for lives in ("none", "off", "broken", "dewey", "/somewhere/else/env"):
+            for lives in ("none", "off", "broken", "moved", "dewey", "/somewhere/else/env"):
                 lines = install.environment_steps(computer(system, lives, in_root=False), OLD)
                 with self.subTest(system=system, lives=lives):
                     self.assertFalse(lines[0].startswith("  "))
@@ -320,6 +356,30 @@ class SwitchPythonLinesTests(unittest.TestCase):
                     for never in ("-m venv", "--clear", "install it first", "install one first", "python.org"):
                         self.assertNotIn(never, text)
 
+    def test_turning_it_on_comes_with_what_to_do_if_that_fails(self):
+        # The wizard can't see everything that stops a .venv from being turned on. Without these
+        # lines, someone whose `python` is then not found, or is another Python, is told "not
+        # turned on" again, for ever. They used to say only that the wizard "will show how to
+        # make the environment again", which it can't if it never gets to run inside it.
+        for where in (computer("mac", "off"), computer("linux", "off", in_root=False), computer("windows", "off"),
+                      computer("linux", OTHER_PROJECT, own_venv=True)):
+            for version in (OLD, NEW):
+                with self.subTest(where=where, version=version):
+                    lines = install.switch_python_lines(where, version)
+                    self.assertEqual(lines[-2:], install.IF_TURNING_ON_FAILS)
+                    self.assertEqual(lines[-3].strip(), "python install.py")   # straight after the last command
+        after = " ".join(install.IF_TURNING_ON_FAILS)
+        self.assertIn("python is not found", after)
+        self.assertIn("see this message again", after)
+        self.assertIn("make the environment again", after)
+        self.assertIn("Recreate the virtual environment, under Troubleshooting in docs/INSTALL.md.", after)
+        # Only where the steps turn an environment on: steps that make one have their own last line.
+        for lives in ("none", "broken", "moved", "dewey", "/home/you/envs/dewey"):
+            with self.subTest(lives=lives):
+                text = "\n".join(install.switch_python_lines(computer("linux", lives), OLD))
+                self.assertNotIn(install.IF_TURNING_ON_FAILS[0], text)
+                self.assertIn("For more help: ", text)
+
     def test_another_projects_environment_is_never_emptied_when_dewey_has_its_own(self):
         # This Python belongs to another project's environment, left turned on, and the Dewey
         # folder has a working .venv: turn that on. Nothing names the other project's folder.
@@ -341,6 +401,46 @@ class SwitchPythonLinesTests(unittest.TestCase):
         self.assertIn("not a working virtual environment", text)
         self.assertIn("deletes what is in .venv", text)
         self.assertIn("Recreate the virtual environment", lines[-1])
+
+    def test_a_dot_venv_made_before_the_folder_was_renamed_or_moved_is_made_again(self):
+        # It used to be called "not turned on", with steps that could not work: turning it on
+        # puts the old folder on the PATH, so `python` is then not found, or is another Python.
+        for system in ("mac", "linux"):
+            for version in (OLD, NEW):
+                with self.subTest(system=system, version=version):
+                    where = computer(system, "moved")
+                    lines = install.switch_python_lines(where, version)
+                    self.assertEqual(commands(lines)[-4:], ["cd " + where.root, "python3.13 -m venv --clear .venv",
+                                                            "source .venv/bin/activate", "python install.py"])
+                    text = " ".join(lines)
+                    self.assertIn("made before the Dewey folder was renamed or moved", text)
+                    self.assertIn("does not work from the new place", text)
+                    self.assertIn("has to be made again", text)
+                    self.assertIn("removes the packages in it", text)
+                    self.assertIn("this wizard installs them again", text)
+                    self.assertIn("deletes what is in .venv", text)
+                    self.assertNotIn("not turned on", text)
+                    self.assertNotIn(install.IF_TURNING_ON_FAILS[0], text)
+                    self.assertIn("Recreate the virtual environment", lines[-1])
+
+    def test_another_projects_environment_is_never_emptied_when_deweys_own_has_to_be_made_again(self):
+        # This Python belongs to another project's environment, left turned on, and the Dewey
+        # folder's own .venv is not a working one. The wizard used to print --clear for the other
+        # project's folder and say nothing of Dewey's.
+        for version in (OLD, NEW):
+            with self.subTest(version=version):
+                where = computer("mac", "/Users/you/other-project/.venv", own_broken=True)
+                lines = install.switch_python_lines(where, version)
+                self.assertEqual(commands(lines, where)[-4:],
+                                 ["cd /Users/you/dewey-ai", "python3.13 -m venv --clear .venv",
+                                  "source .venv/bin/activate", "python install.py"])
+                text = "\n".join(lines)
+                self.assertIn("The Dewey folder has a .venv folder, but it is not a working virtual environment",
+                              text)
+                self.assertNotIn("other-project", text)
+                self.assertNotIn("that environment has to be made again", text)
+                self.assertIn("deletes what is in .venv", text)
+                self.assertIn("Recreate the virtual environment", lines[-1])
 
     def test_no_environment_yet_makes_one_without_clear(self):
         lines = install.switch_python_lines(computer("mac", "none"), OLD)
@@ -380,7 +480,7 @@ class SwitchPythonLinesTests(unittest.TestCase):
         # After installing Python the guide has people open a new terminal window, which starts in
         # the home folder: `--clear .venv` there would empty the wrong environment.
         for system in ("mac", "linux", "windows"):
-            for lives in ("none", "broken", "dewey", "/somewhere/else/env"):
+            for lives in ("none", "broken", "moved", "dewey", "/somewhere/else/env"):
                 with self.subTest(system=system, lives=lives):
                     where = computer(system, lives, in_root=True)
                     self.assertTrue(commands(install.switch_python_lines(where, OLD), where)[0].startswith("cd "))
@@ -393,7 +493,8 @@ class SwitchPythonLinesTests(unittest.TestCase):
             return guide.split(f"\n## {heading}\n", 1)[1].split("\n## ", 1)[0]
 
         said_somewhere = "\n".join(
-            line for system in ("mac", "linux", "windows") for lives in ("none", "off", "broken", "dewey", "/e")
+            line for system in ("mac", "linux", "windows")
+            for lives in ("none", "off", "broken", "moved", "dewey", "/e")
             for version in (OLD, UNTESTED, NEW)
             for line in install.python_check_lines(version, computer(system, lives)))
         create, recreate = "Create a virtual environment", "Recreate the virtual environment"
@@ -402,6 +503,7 @@ class SwitchPythonLinesTests(unittest.TestCase):
                 (f"step 4 of {create} in docs/INSTALL.md", create, "\n4. **On Linux, update pip.**"),
                 (f"For more help: {recreate}, under Troubleshooting in docs/INSTALL.md.",
                  "Troubleshooting", f"\n**{recreate}.**"),
+                ("\n" + install.IF_TURNING_ON_FAILS[1], "Troubleshooting", f"\n**{recreate}.**"),   # a line of its own
                 ("see Troubleshooting in docs/INSTALL.md", "Troubleshooting", "`Dewey is tested with Python "),
                 ("(Get your Linux computer ready, step 3)", "Get your Linux computer ready",
                  "\n3. **Install Python.**")):
@@ -426,12 +528,14 @@ class PrintedCommandsPasteSafelyTests(unittest.TestCase):
 
     def situations(self):
         for system in ("mac", "linux"):
-            for lives in ("none", "off", "broken", "dewey", "/home/you/envs/dewey", "/home/you/my envs/dewey's [old]"):
+            for lives in ("none", "off", "broken", "moved", "dewey", "/home/you/envs/dewey",
+                          "/home/you/my envs/dewey's [old]"):
                 for in_root in (True, False):
                     for root in (None, "/Users/you/My Projects/dewey-ai (copy)"):
                         yield computer(system, lives, in_root=in_root, root=root)
                         if lives.startswith("/"):
                             yield computer(system, lives, in_root=in_root, root=root, own_venv=True)
+                            yield computer(system, lives, in_root=in_root, root=root, own_broken=True)
 
     def test_printed_commands_paste_safely_into_zsh(self):
         checked = 0
@@ -470,7 +574,7 @@ class CheckPythonTests(unittest.TestCase):
 
     def test_too_old_and_too_new_stop_without_asking(self):
         for version, word in ((OLD, "too old"), (NEW, "too new")):
-            for lives in ("none", "broken", "dewey", "/home/you/envs/dewey"):
+            for lives in ("none", "broken", "moved", "dewey", "/home/you/envs/dewey"):
                 with self.subTest(version=version, lives=lives):
                     carry_on, out = said(install.check_python, version, computer("linux", lives))
                     self.assertIs(carry_on, False)
@@ -493,7 +597,7 @@ class CheckPythonTests(unittest.TestCase):
                     self.assertNotIn("other-project", out)
 
     def test_untested_python_gets_three_lines_and_carries_on(self):
-        for lives in ("none", "broken", "dewey", "/home/you/envs/dewey"):
+        for lives in ("none", "broken", "moved", "dewey", "/home/you/envs/dewey"):
             with self.subTest(lives=lives):
                 carry_on, out = said(install.check_python, UNTESTED, computer("linux", lives))
                 self.assertIs(carry_on, True)
@@ -560,7 +664,8 @@ class InstallStepHintTests(unittest.TestCase):
 
     def test_the_hint_is_the_shared_steps(self):
         for where in (computer("mac", "none"), computer("linux", "none", in_root=False), computer("windows", "none"),
-                      computer("mac", "off"), computer("windows", "off"), computer("linux", "broken")):
+                      computer("mac", "off"), computer("windows", "off"), computer("linux", "broken"),
+                      computer("mac", "moved"), computer("linux", "moved", in_root=False)):
             with self.subTest(where=where):
                 out = self.hint(where)
                 self.assertIn("You're not in a virtual environment.", out)   # docs/INSTALL.md quotes this
@@ -580,6 +685,51 @@ class InstallStepHintTests(unittest.TestCase):
         self.assertIn("not a working virtual environment", out)
         self.assertIn("-m venv --clear .venv\n", out)
         self.assertIn("deletes what is in .venv", out)
+
+    def test_a_dot_venv_made_before_the_folder_was_renamed_or_moved_is_made_again(self):
+        # It used to get the "not turned on" hint, whose steps could not work.
+        out = self.hint(computer("mac", "moved"))
+        told = " ".join(out.split())
+        self.assertIn("You're not in a virtual environment.", out)
+        self.assertIn("made before the Dewey folder was renamed or moved", told)
+        self.assertIn("does not work from the new place", told)
+        self.assertIn("installs the packages again", told)
+        self.assertIn("-m venv --clear .venv\n", out)
+        self.assertIn("deletes what is in .venv", out)
+        self.assertNotIn("not turned on", out)
+        self.assertNotIn("not a working virtual environment", out)   # it says why, in its own words
+
+    def test_turning_it_on_comes_with_what_to_do_if_that_fails(self):
+        # See SwitchPythonLinesTests: the same two lines, directly under the steps.
+        for where in (computer("mac", "off"), computer("windows", "off"), computer("linux", "off", in_root=False)):
+            with self.subTest(where=where):
+                steps = "\n".join(install.environment_steps(where)) + "\n"
+                self.assertIn(steps + "\n".join(install.IF_TURNING_ON_FAILS) + "\n", self.hint(where))
+        for lives in ("none", "broken", "moved"):
+            with self.subTest(lives=lives):
+                self.assertNotIn(install.IF_TURNING_ON_FAILS[0], self.hint(computer("mac", lives)))
+
+
+# The part of bin/activate that records the folder an environment was made in, as it was written
+# on a Mac in November 2026 by `python -m venv` with Python 3.9.6, 3.12.6 and 3.13.9 (3.14.10 and
+# 3.15.2 write what 3.13 does), and by uv 0.13.9. {plain} is the folder as it is, {quoted} the
+# folder with quotes where a shell needs them, {always} the folder in quotes whatever its name.
+ACTIVATE_SCRIPTS = {
+    "python 3.9": ('deactivate nondestructive\n\nVIRTUAL_ENV="{plain}"\nexport VIRTUAL_ENV\n\n'
+                   '_OLD_VIRTUAL_PATH="$PATH"\nPATH="$VIRTUAL_ENV/bin:$PATH"\nexport PATH\n'),
+    "python 3.12": ('if [ "${{OSTYPE:-}}" = "cygwin" ] || [ "${{OSTYPE:-}}" = "msys" ] ; then\n'
+                    '    export VIRTUAL_ENV=$(cygpath "{plain}")\nelse\n    # use the path as-is\n'
+                    '    export VIRTUAL_ENV="{plain}"\nfi\n\n_OLD_VIRTUAL_PATH="$PATH"\n'
+                    'PATH="$VIRTUAL_ENV/bin:$PATH"\nexport PATH\n'),
+    "python 3.13": ('case "$(uname)" in\n    CYGWIN*|MSYS*|MINGW*)\n        VIRTUAL_ENV=$(cygpath {quoted})\n'
+                    '        export VIRTUAL_ENV\n        ;;\n    *)\n        # use the path as-is\n'
+                    '        export VIRTUAL_ENV={quoted}\n        ;;\nesac\n\n_OLD_VIRTUAL_PATH="$PATH"\n'
+                    'PATH="$VIRTUAL_ENV/bin:$PATH"\nexport PATH\n\nVIRTUAL_ENV_PROMPT=.venv\n'
+                    'export VIRTUAL_ENV_PROMPT\n'),
+    "uv 0.13": ('deactivate nondestructive\n\nVIRTUAL_ENV={always}\n'
+                'if ([ "$OSTYPE" = "cygwin" ] || [ "$OSTYPE" = "msys" ]) && $(command -v cygpath &> /dev/null) ; '
+                'then\n    VIRTUAL_ENV=$(cygpath -u "$VIRTUAL_ENV")\nfi\nexport VIRTUAL_ENV\n'),
+}
 
 
 class PythonSituationTests(unittest.TestCase):
@@ -660,6 +810,109 @@ class PythonSituationTests(unittest.TestCase):
             os.symlink("/nowhere/python3.13", str(install.venv_python()))
             where = self.situation("/usr")
             self.assertEqual((where.dewey_venv_exists, where.dewey_venv_broken), (False, True))
+
+    def activate_script(self, style, made_in, folder=None):
+        """Write bin/activate into the Dewey folder's .venv (or `folder`), as an environment made
+        in the folder `made_in` has it."""
+        script = (folder or self.root / ".venv") / "bin" / "activate"
+        made_in = str(made_in)
+        always = "'" + made_in.replace("'", "'\"'\"'") + "'"
+        script.write_text(ACTIVATE_SCRIPTS[style].format(plain=made_in, quoted=shlex.quote(made_in), always=always),
+                          encoding="utf-8")
+
+    def state(self, where):
+        return where.dewey_venv_exists, where.dewey_venv_broken, where.dewey_venv_moved
+
+    @unittest.skipIf(os.name == "nt", "bin/activate is how an environment is turned on in bash and zsh")
+    def test_a_dot_venv_made_before_its_folder_was_renamed_or_moved_is_not_a_working_environment(self):
+        # Turning it on puts the folder it was made in on the PATH. That folder is gone, so
+        # `python` is then not found, or is another Python (RealInterpreterTests shows it).
+        self.make_venv(self.root / ".venv")
+        self.assertEqual(self.state(self.situation("/usr")), (True, False, False))   # no activate script: no claim
+        for style in ACTIVATE_SCRIPTS:
+            for name in ("dewey-ai-main", "My Projects/dewey ai", "jo's dewey", 'the "old" one', "this; & that"):
+                with self.subTest(style=style, name=name):
+                    self.activate_script(style, self.root.parent / name / ".venv")
+                    self.assertEqual(self.state(self.situation("/usr")), (False, True, True))
+            # Taken out of another folder: where it is now is the end of where it was made.
+            with self.subTest(style=style, name="out of a backup"):
+                self.activate_script(style, "/Volumes/Backup" + str(self.root / ".venv"))
+                self.assertEqual(self.state(self.situation("/usr")), (False, True, True))
+        # Still where it was made: only not turned on.
+        for style in ACTIVATE_SCRIPTS:
+            with self.subTest(style=style):
+                self.activate_script(style, self.root / ".venv")
+                self.assertEqual(self.state(self.situation("/usr")), (True, False, False))
+
+    @unittest.skipIf(os.name == "nt", "bin/activate is how an environment is turned on in bash and zsh")
+    def test_an_awkward_folder_name_is_never_mistaken_for_a_move(self):
+        # Python 3.12 and older write the folder into the script as it is, quotes and all, so
+        # what a shell reads there can be another folder. That environment has a problem of its
+        # own, but it was not moved: saying so would send its owner round in circles.
+        for name in ('say "hi"', "jo's dewey (copy)", "this; & that", "dollar$sign", "tick`tock", "plain"):
+            dewey = self.root / name
+            self.make_venv(dewey / ".venv")
+            for style in ACTIVATE_SCRIPTS:
+                with self.subTest(name=name, style=style), mock.patch.object(install, "ROOT", dewey):
+                    self.activate_script(style, dewey / ".venv", folder=dewey / ".venv")
+                    self.assertEqual(self.state(self.situation("/usr", cwd=dewey)), (True, False, False))
+
+    @unittest.skipIf(os.name == "nt", "bin/activate is how an environment is turned on in bash and zsh")
+    def test_a_copied_dewey_folder_is_told_apart_from_the_one_it_was_copied_from(self):
+        # The copy's activate script names the first folder's environment, which is still there:
+        # turned on, it would run that one, and the wizard would say "not turned on" for ever.
+        self.make_venv(self.root / ".venv")
+        first = self.root / "first" / ".venv"
+        self.make_venv(first)
+        self.activate_script("python 3.13", first)
+        self.assertEqual(self.state(self.situation("/usr")), (False, True, True))
+        # The same folder under another name is not another folder: a link to it, a trailing slash.
+        os.symlink(str(self.root), str(self.root.parent / (self.root.name + "-link")))
+        self.addCleanup(os.unlink, str(self.root.parent / (self.root.name + "-link")))
+        for same in (self.root.parent / (self.root.name + "-link") / ".venv", str(self.root / ".venv") + "/"):
+            with self.subTest(same=same):
+                self.activate_script("python 3.12", same)
+                self.assertEqual(self.state(self.situation("/usr")), (True, False, False))
+
+    @unittest.skipIf(os.name == "nt", "bin/activate is how an environment is turned on in bash and zsh")
+    def test_an_environment_is_only_called_moved_on_its_own_word(self):
+        # Making it again deletes what is in it, so anything the wizard can't read for certain
+        # leaves the environment as it was: "not turned on".
+        self.make_venv(self.root / ".venv")
+        script = self.root / ".venv" / "bin" / "activate"
+        for unclear in ("", "# nothing here sets it\n", "export VIRTUAL_ENV_PROMPT='(.venv) '\n",
+                        'VIRTUAL_ENV="$(cd "$(dirname "$0")/.." && pwd)"\nexport VIRTUAL_ENV\n',   # worked out when run
+                        "VIRTUAL_ENV='an unfinished quote\n", "VIRTUAL_ENV=two words\n",
+                        "# VIRTUAL_ENV=/somewhere/else/.venv\n", "unset VIRTUAL_ENV\n"):
+            with self.subTest(unclear=unclear):
+                script.write_text(unclear, encoding="utf-8")
+                self.assertEqual(self.state(self.situation("/usr")), (True, False, False))
+        # A folder with a $ or a backquote in its name is not compared either: in some of these
+        # scripts a shell would read that as something to work out.
+        for style in ACTIVATE_SCRIPTS:
+            for name in ("dollar$sign", "tick`tock"):
+                with self.subTest(style=style, name=name):
+                    self.activate_script(style, self.root.parent / name / ".venv")
+                    self.assertEqual(self.state(self.situation("/usr")), (True, False, False))
+        script.unlink()
+        script.mkdir()   # not a file at all
+        self.assertEqual(self.state(self.situation("/usr")), (True, False, False))
+        # One line that names this folder is enough, whatever else the script says.
+        script.rmdir()
+        script.write_text(f"VIRTUAL_ENV=/somewhere/else/.venv\nVIRTUAL_ENV={shlex.quote(str(self.root / '.venv'))}\n",
+                          encoding="utf-8")
+        self.assertEqual(self.state(self.situation("/usr")), (True, False, False))
+
+    @unittest.skipIf(os.name == "nt", "bin/activate is how an environment is turned on in bash and zsh")
+    def test_the_environment_the_wizard_runs_in_is_never_called_moved(self):
+        # Its Python is running this wizard: whatever its activate script says, it works.
+        self.make_venv(self.root / ".venv")
+        self.activate_script("python 3.13", "/the/old/place/.venv")
+        where = self.situation(self.root / ".venv")
+        self.assertEqual((where.in_dewey_venv,) + self.state(where), (True, True, False, False))
+        # And a .venv that is not a working environment anyway is not looked at.
+        (install.venv_python()).unlink()
+        self.assertEqual(self.state(self.situation("/usr")), (False, True, False))
 
     def test_the_terminals_folder(self):
         self.assertIs(self.situation("/usr", cwd=self.root).in_root, True)
@@ -914,14 +1167,15 @@ spec.loader.exec_module(module)
 built = 0
 for system, root, sep in (("mac", "/Users/you/dewey-ai", "/"), ("linux", "/home/you/dewey-ai", "/"),
                           ("windows", "C:\\\\Users\\\\you\\\\dewey-ai", "\\\\")):
-    for venv, in_dewey, exists, broken in (
-            ("", False, False, False), ("", False, True, False), ("", False, False, True),
-            (root + sep + ".venv", True, True, False),
-            (root + sep + "my env", False, False, False), (root + sep + "my env", False, True, False)):
+    for venv, in_dewey, exists, broken, moved in (
+            ("", False, False, False, False), ("", False, True, False, False), ("", False, False, True, False),
+            ("", False, False, True, True), (root + sep + ".venv", True, True, False, False),
+            (root + sep + "my env", False, False, False, False), (root + sep + "my env", False, True, False, False),
+            (root + sep + "my env", False, False, True, False)):
         for in_root in (True, False):
             where = module.PythonSituation(system=system, root=root, in_root=in_root, venv=venv,
                                            in_dewey_venv=in_dewey, dewey_venv_exists=exists,
-                                           dewey_venv_broken=broken)
+                                           dewey_venv_broken=broken, dewey_venv_moved=moved)
             for version in ((3, 9, 6), (3, 14, 10), (3, 15, 2), (3, 12, 3)):
                 assert module.environment_steps(where, version)
                 if module.python_verdict(version) != "ok":
@@ -1031,7 +1285,7 @@ class RealInterpreterTests(unittest.TestCase):
         # Every message for every system builds under the old Python: nothing in them needs newer.
         result = self.run_python(python, "-B", "-c", EVERY_MESSAGE, str(self.root / "install.py"))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("BUILT 144", result.stdout)
+        self.assertIn("BUILT 192", result.stdout)
 
     @unittest.skipIf(os.name == "nt", "a Windows environment holds a copy of python.exe, not a link to it")
     def test_an_environment_whose_python_is_gone_is_only_repaired_with_clear(self):
@@ -1068,6 +1322,79 @@ class RealInterpreterTests(unittest.TestCase):
         make("--clear")
         self.assertTrue(python.exists())
         self.assertEqual((situation().dewey_venv_exists, situation().dewey_venv_broken), (True, False))
+
+    def renamed_dewey_folder(self, python):
+        """A Dewey folder that was renamed after its .venv was made, with that Python: someone
+        downloads Dewey as dewey-ai-main, makes the environment, then renames the folder."""
+        before, dewey = self.root / "dewey-ai-main", self.root / "dewey-ai"
+        before.mkdir()
+        made = self.run_python(python, "-m", "venv", "--without-pip", ".venv", cwd=before)
+        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        self.assertEqual(self.state_of(before), (True, False, False))   # where it was made: only not turned on
+        before.rename(dewey)
+        shutil.copy2(REPO / "install.py", dewey / "install.py")
+        return dewey
+
+    def state_of(self, dewey):
+        """What the wizard makes of that folder's .venv, from outside any environment."""
+        with mock.patch.object(install, "ROOT", dewey), \
+                mock.patch.object(sys, "prefix", getattr(sys, "base_prefix", sys.prefix)):
+            where = install.python_situation()
+        return where.dewey_venv_exists, where.dewey_venv_broken, where.dewey_venv_moved
+
+    def python_after_turning_on(self, dewey):
+        """What `python` is in a new shell once that folder's .venv is turned on; "" when not found."""
+        shell = subprocess.run([shutil.which("bash") or "/bin/sh", "-c", ". .venv/bin/activate && command -v python"],
+                               cwd=str(dewey), env={"PATH": "/usr/bin:/bin", "HOME": str(self.root)},
+                               stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+                               timeout=120)
+        return shell.stdout.strip()
+
+    @unittest.skipIf(os.name == "nt", "in PowerShell an environment is turned on with Activate.ps1, which works "
+                                      "out where it is each time it runs")
+    def test_an_environment_made_before_its_folder_was_renamed_is_made_again_not_turned_on(self):
+        # The wizard used to call it "not turned on" and print steps that could not work.
+        dewey = self.renamed_dewey_folder(sys.executable)
+        own = str(dewey / ".venv" / "bin" / "python")
+        self.assertTrue(os.path.exists(own))                            # its Python is still there...
+        self.assertNotEqual(self.python_after_turning_on(dewey), own)   # ...but turning it on no longer finds it
+        self.assertEqual(self.state_of(dewey), (False, True, True))
+
+        with mock.patch.object(install, "ROOT", dewey), \
+                mock.patch.object(sys, "prefix", getattr(sys, "base_prefix", sys.prefix)):
+            where = install.python_situation()
+        steps = install.environment_steps(where)
+        (again,) = [line.strip() for line in steps if "-m venv" in line]
+        self.assertRegex(again, r"^python3\.\d+ -m venv --clear \.venv$")
+        self.assertIn("  source .venv/bin/activate", steps)
+        told = " ".join(install.switch_python_lines(where, OLD))
+        self.assertIn("made before the Dewey folder was renamed or moved", told)
+        self.assertNotIn("not turned on", told)
+
+        # The printed command, run with this Python: afterwards the environment can be turned on.
+        made = self.run_python(sys.executable, *again.split()[1:], "--without-pip", cwd=dewey)
+        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        self.assertEqual(self.python_after_turning_on(dewey), own)
+        self.assertEqual(self.state_of(dewey), (True, False, False))
+
+    @unittest.skipIf(os.name == "nt", "in PowerShell an environment is turned on with Activate.ps1, which works "
+                                      "out where it is each time it runs")
+    def test_an_older_python_is_told_the_folder_was_renamed_not_to_turn_the_environment_on(self):
+        # The same, as the review of this work found it: after `python` stops being found, someone
+        # on a Mac types python3, which is Apple's 3.9. The wizard has to say what is wrong there.
+        python, found = find_python((3, 9), install.MIN_PYTHON)
+        if python is None:
+            self.skipTest(found)
+        dewey = self.renamed_dewey_folder(python)
+        result = self.run_python(python, "-B", str(dewey / "install.py"), "--no-browser", cwd=dewey)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("which is too old.", result.stdout)
+        self.assertIn("renamed or moved", result.stdout)
+        self.assertRegex(result.stdout, r"\n  (python3\.\d+|py -3\.\d+) -m venv --clear \.venv\n")
+        self.assertIn("deletes what is in .venv", result.stdout)
+        for never in ("not turned on", "Which stack?", "Traceback"):
+            self.assertNotIn(never, result.stdout + result.stderr)
+        self.assertFalse((dewey / ".env").exists())
 
     def test_a_newer_python_on_this_computer_is_refused_before_any_question(self):
         # Box (g), for real.

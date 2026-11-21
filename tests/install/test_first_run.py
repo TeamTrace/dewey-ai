@@ -222,6 +222,24 @@ class McpTokenMessageTests(unittest.TestCase):
         for secret in (short, token):
             self.assertNotIn(secret, out)
 
+    def test_a_new_token_is_only_promised_for_when_the_answers_are_written(self):
+        # This step comes before "Write this to .env?", and with --dry-run nothing is written at
+        # all. It used to say flatly that the token "will be saved", then "Afterwards, restart
+        # the MCP server ... the old one stops working", on runs that left the old one in place.
+        for cur, answers in (({}, []), ({"DEWEY_MCP_TOKEN": self.SAVED}, ["n"]),
+                             ({"DEWEY_MCP_TOKEN": "tooshort-TOKEN-123"}, [])):
+            with self.subTest(cur=sorted(cur)):
+                _, out, _ = wizard(install.ask_mcp, cur, answers=answers)
+                told = " ".join(out.split())
+                self.assertIn("will be saved in .env with your other answers when you confirm at the end", told)
+                self.assertIn("(never with --dry-run)", told)
+                self.assertNotIn("Afterwards", out)
+                self.assertEqual("Once it is saved, restart the MCP server" in told, bool(cur))
+        # A token that is kept makes no promise about saving: nothing about it changes.
+        _, out, _ = wizard(install.ask_mcp, {"DEWEY_MCP_TOKEN": self.SAVED}, answers=[""])
+        self.assertNotIn("confirm at the end", out)
+        self.assertNotIn("Once it is saved", out)
+
     def test_the_wizard_and_the_server_agree_on_the_shortest_token(self):
         server = (REPO / "app" / "mcp_server.py").read_text(encoding="utf-8")
         self.assertRegex(server, rf"(?m)^MIN_TOKEN_CHARS = {install.MCP_MIN_TOKEN_CHARS}\b")

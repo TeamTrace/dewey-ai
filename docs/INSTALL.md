@@ -1174,7 +1174,7 @@ Find the message you see. Fixes with several commands come after the table.
 
 | You see | What to do |
 |---|---|
-| `zsh: command not found: python` (Linux: `bash: python: command not found`) | The virtual environment is off: [turn it on](#turn-it-on-in-every-new-terminal-window). |
+| `zsh: command not found: python` (Linux: `bash: python: command not found`) | The virtual environment is off: [turn it on](#turn-it-on-in-every-new-terminal-window). If you see it right after turning it on, the Dewey folder was renamed or moved after `.venv` was made, or the Python that made `.venv` has been removed: recreate the environment (below). |
 | `zsh: command not found: python3.13` (Linux: `bash: python3.13: command not found`) | Open a new window; if it persists, install Python 3.13 ([Mac](#get-your-mac-ready); [Linux](#get-your-linux-computer-ready), step 3). |
 | `Dewey needs Python 3.11 to 3.13; this is 3.9.6, which is too old.` (or another number, or `too new`) | The wizard stopped before its first question because this Python can't install Dewey's packages: Apple's 3.9, say, or 3.15. Follow the steps it prints; usually they recreate the environment (below). |
 | `Dewey is tested with Python 3.11 to 3.13; this is 3.14.10.` (or another number) | Not an error: the wizard carries on. Python 3.13 is the safer choice. To switch, press Control+C, then follow the wizard's steps if it printed any, or recreate the environment with 3.13 (below). |
@@ -1245,7 +1245,7 @@ Find the message you see. Fixes with several commands come after the table.
 
 </details>
 
-**Recreate the virtual environment.** If the prompt starts with `(.venv)`, type `deactivate` first. Then make it again with the right Python (Ubuntu 24.04: `python3.12`), turn it on, update pip again on Linux (step 4 of [Create a virtual environment](#create-a-virtual-environment)), and run the wizard again. The wizard prints these commands itself when it stops because `.venv` was made with a Python it can't use.
+**Recreate the virtual environment.** If the prompt starts with `(.venv)`, type `deactivate` first. Then make it again with the right Python (Ubuntu 24.04: `python3.12`), turn it on, update pip again on Linux (step 4 of [Create a virtual environment](#create-a-virtual-environment)), and run the wizard again. The wizard prints these commands itself when it stops because `.venv` was made with a Python it can't use. On macOS and Linux it also prints them when `.venv` was made before the Dewey folder was renamed or moved: turning that environment on no longer finds its Python, and Python's guide says to make an environment again in its new place ([venv guide](https://github.com/python/cpython/blob/3.13/Doc/library/venv.rst), checked November 2026). Making it again empties `.venv`, so press Enter at `Install requirements.txt now?` to install the packages again.
 
 On macOS and Linux:
 
