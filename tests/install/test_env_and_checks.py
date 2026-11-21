@@ -290,6 +290,40 @@ class PostgresCheckTests(unittest.TestCase):
         self.assertEqual(self.check(self.database(installed="0.8.7\x1b[31mRED", default="0.8.7")),
                          "  Postgres: ok, pgvector 0.8.7 available\n")
 
+    def test_nothing_is_guessed_about_a_version_the_check_cannot_read(self):
+        # The lines under the result say only what the check knows. It can't compare a version it
+        # can't read with the server's, so that version gets both steps whatever the server has:
+        # never "The database server already has X, but this database hasn't been updated to it".
+        unreadable = ("  Postgres: connected, but pgvector's version can't be read, so Dewey "
+                      f"treats it as {self.OLD}\n")
+        in_database = {}
+        for default in ("0.8.7", "0.6.0", "zzz", None):
+            with self.subTest(installed="zzz", default=default):
+                shown = in_database[default] = self.check(self.database(installed="zzz", default=default))
+                self.assertTrue(shown.startswith(unreadable), shown)
+                for words in ("install pgvector 0.8 or newer on the database server", "as a Postgres superuser",
+                              self.UPDATE, self.DOCS):
+                    self.assertIn(words, shown)
+                for words in ("already has", "hasn't been", "0.8.7", "0.6.0", "zzz"):
+                    self.assertNotIn(words, shown)
+        with self.subTest("the same lines, whatever the server has"):
+            self.assertEqual(len(set(in_database.values())), 1, in_database)
+        # Before the extension exists in this database there is nothing in it to update, as for a
+        # version the check can read. But the first line has named no version here, so the words
+        # "that is the version the server would give it" would point at nothing.
+        for default in ("zzz", None):
+            with self.subTest(installed=None, default=default):
+                shown = self.check(self.database(installed=None, default=default))
+                self.assertTrue(shown.startswith(unreadable), shown)
+                for words in ("pgvector isn't turned on in this database yet.\n",
+                              "Install pgvector 0.8 or newer on the database server before you index.", self.DOCS):
+                    self.assertIn(words, shown)
+                for words in (self.UPDATE, "that is the version", "zzz"):
+                    self.assertNotIn(words, shown)
+        # After a first line that names the version, those words stay.
+        self.assertIn("pgvector isn't turned on in this database yet; that is the version the server would give it.\n",
+                      self.check(self.database(installed=None, default="0.6.0")))
+
     def test_the_guides_quote_the_result_as_it_is_printed(self):
         # A reader finds the right troubleshooting row by searching for the words on their screen,
         # and the result sends them to a section by its title.

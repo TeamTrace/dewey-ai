@@ -666,6 +666,9 @@ def pgvector_status(default_version, installed_version) -> str:
     which is the extversion Dewey reads at every search) or, where CREATE EXTENSION hasn't run
     yet, the one the server would give it (default_version). Older than 0.8, or unreadable, is
     flagged with what to do about it: a result to read, never a reason to stop the wizard.
+    The lines under the result say only what the check knows. It can't compare a version it
+    can't read with the server's, so it never calls that one behind the server's: such a
+    version gets both steps, or the step that comes before indexing.
     Lines after the first are indented to sit under it in the list of results.
     """
     in_database = installed_version is not None
@@ -680,9 +683,13 @@ def pgvector_status(default_version, installed_version) -> str:
     lines = [f"connected, but {found}: date and byline searches can miss stories"]
     on_server = pgvector_version(default_version)
     if not in_database:
-        lines += ["pgvector isn't turned on in this database yet; that is the version the server would give it.",
+        # Nothing in this database to update yet, so no ALTER EXTENSION. "that" is the version
+        # the first line names, so it is said only when the first line names one.
+        which = "; that is the version the server would give it." if version is not None else "."
+        lines += [f"pgvector isn't turned on in this database yet{which}",
                   "Install pgvector 0.8 or newer on the database server before you index."]
-    elif on_server is not None and on_server >= MIN_PGVECTOR:
+    elif version is not None and on_server is not None and on_server >= MIN_PGVECTOR:
+        # Only of a version the check could read: one it can't read may not be behind the server's.
         lines += [f"The database server already has pgvector {pgvector_version_text(default_version)}, "
                   "but this database hasn't been",
                   "updated to it. To fix it, run this in Dewey's database as a Postgres superuser:",
