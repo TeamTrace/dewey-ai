@@ -58,9 +58,12 @@ UPDATE = "docker update --restart unless-stopped dewey-db"
 EXISTS_HELP = '"The database container already exists" in docs/INSTALL.md'
 MISMATCH_HELP = '"The database password doesn\'t match" in docs/INSTALL.md'
 OLDER_HELP = '"An older dewey-db" in docs/INSTALL.md'
+OLDER = "doesn't use the volume dewey-db-data"  # how the wizard names an older container; the guide quotes it
 COMPOSE_LINE = "separate from the db service in docker-compose.yml"
 SHOWS_SAVED = "The command below shows the database password saved in .env"  # said before the command
 USES_SAVED = "This wizard uses the database password saved in .env"
+COMES_BACK = "starts again when Docker starts, unless you stopped it yourself"  # may wrap: look in flat(text)
+UNSEEN = "This wizard couldn't see whether dewey-db already exists"  # said when Docker gave no answer
 
 
 def url_for(password):
@@ -136,6 +139,11 @@ def docker_commands(text):
     return [" ".join(command.split()) for _, command in joined_commands(lines) if command.startswith("docker ")]
 
 
+def flat(text):
+    """What was shown as one line, for sentences that wrap from one printed line to the next."""
+    return " ".join(text.split())
+
+
 def printed_password(text):
     found = re.findall(r"-e POSTGRES_PASSWORD=(\S+) \\", text)
     assert len(found) == 1, f"expected one docker run command, found {len(found)}:\n{text}"
@@ -156,6 +164,7 @@ class TheCommandTests(unittest.TestCase):
         self.assertEqual(text.count(password), 1, text)  # shown once, inside the command
         self.assertEqual(result, {"DATABASE_URL": url_for(password), "POSTGRES_PASSWORD": password})
         self.assertIn("Is it running? (Y/n)", text)
+        self.assertNotIn("couldn't see", text)  # Docker answered: nothing exists yet
         # How to start it again, and that Compose's database is another one.
         self.assertIn(f"\n         {START}\n", text)
         self.assertIn("unless you stopped it yourself", text)
@@ -263,6 +272,7 @@ class ExistingDatabaseTests(unittest.TestCase):
         self.assertNotIn(SAVED, text)
         self.assertIn("it is running: nothing to start", text)
         self.assertEqual(docker_commands(text), [START])  # how to start it again, nothing else
+        self.assertIn(COMES_BACK, flat(text))
         self.assertIn(COMPOSE_LINE, text)
         # The only evidence is POSTGRES_PASSWORD, which Compose's database uses too.
         self.assertIn(f"{USES_SAVED}: the POSTGRES_PASSWORD line.", text)
@@ -296,8 +306,23 @@ class ExistingDatabaseTests(unittest.TestCase):
                 self.assertIn(f'"{state}"', text)  # the state Docker reports, named
                 self.assertIn("Is it running? (Y/n)", text)
                 self.assertNotIn(SAVED, text)
+                # Which saved password is trusted, and where to turn if the database has another:
+                # POSTGRES_PASSWORD is evidence, not proof (Compose's database reads that line too).
+                self.assertIn(f"{USES_SAVED}: the POSTGRES_PASSWORD line.", text)
+                self.assertIn(MISMATCH_HELP, text)
+                # How it comes back by itself, and how to start it another time: the command is
+                # printed once, to run now, and pointed back to.
+                self.assertIn(COMES_BACK, flat(text))
+                self.assertIn("If it is ever stopped again, start Docker, then use the docker start command above.",
+                              text)
+                self.assertLess(text.index(f"\n    {START}\n"), text.index("docker start command above"))
                 result, _ = offer(cur, look(state, volume=True, uses_volume=True), ["n"], new_password=False)
                 self.assertEqual(result, {"DATABASE_URL": ""})
+        # A password from inside the saved address is what Dewey connects with: no such pointer.
+        _, text = offer({"DATABASE_URL": url_for(SAVED)}, look("exited", volume=True, uses_volume=True), ["y"],
+                        new_password=False)
+        self.assertIn(f"{USES_SAVED}: the one inside DATABASE_URL.", text)
+        self.assertNotIn(MISMATCH_HELP, text)
 
     def test_an_existing_container_without_a_saved_password_is_never_given_one(self):
         for cur in ({}, {"POSTGRES_PASSWORD": "p@ss-word!"}, {"DATABASE_URL": ELSEWHERE}):
@@ -365,6 +390,28 @@ class ExistingDatabaseTests(unittest.TestCase):
         self.assertNotIn("docker update", text)
         self.assertNotIn("An older dewey-db", text)
 
+    def test_an_older_container_is_named_as_one_with_or_without_a_saved_password(self):
+        # The guide's "An older dewey-db" tells people how the wizard names such a container, so the
+        # wizard has to say it wherever it finds one. The issue's own example has no saved password:
+        # a dewey-db started after answering No to the earlier wizard, which kept nothing.
+        settings = ({}, {"POSTGRES_PASSWORD": "p@ss-word!"}, {"DATABASE_URL": ELSEWHERE},
+                    {"POSTGRES_PASSWORD": SAVED}, {"DATABASE_URL": url_for(SAVED)})
+        for cur, state in itertools.product(settings, ("running", "exited", "created")):
+            saved, _ = install.saved_docker_password(cur)
+            answers = ["n"] if saved and state != "running" else []  # only then is "Is it running?" asked
+            for volume in (False, True):  # a volume of that name can exist without being this container's
+                with self.subTest(settings=sorted(cur), usable_password=bool(saved), state=state, volume=volume):
+                    _, text = offer(cur, look(state, volume=volume), answers, new_password=False)
+                    self.assertIn(OLDER, text)
+                    self.assertIn(OLDER_HELP, text)
+                    if not saved:  # this path prints no command: the guide's section has them
+                        self.assertEqual(docker_commands(text), [])
+                        self.assertNotIn("docker update", text)
+            with self.subTest(settings=sorted(cur), usable_password=bool(saved), state=state, uses_volume=True):
+                _, text = offer(cur, look(state, volume=True, uses_volume=True), answers, new_password=False)
+                self.assertNotIn(OLDER, text)
+                self.assertNotIn("An older dewey-db", text)
+
 
 class DockerSilentTests(unittest.TestCase):
     """Rows 8 and 9, and the one offer to look again."""
@@ -375,6 +422,7 @@ class DockerSilentTests(unittest.TestCase):
         password = printed_password(text)
         self.assertEqual(result, {"DATABASE_URL": ""})  # nothing saved, the password least of all
         self.assertIn("Is it running? (y/N)", text)
+        self.assertLess(text.index(UNSEEN), text.index("docker run"))  # said before the command it qualifies
         self.assertIn("already in use", text)
         self.assertIn("Don't remove anything: answer n", text)
         self.assertIn(EXISTS_HELP, text)
@@ -394,6 +442,7 @@ class DockerSilentTests(unittest.TestCase):
         self.assertEqual(printed_password(text), SAVED)
         self.assertIn(SHOWS_SAVED, text)
         self.assertIn("Is it running? (y/N)", text)
+        self.assertLess(text.index(UNSEEN), text.index("docker run"))
         self.assertIn("already in use", text)
         self.assertIn(f"\n    {START}\n", text)  # start it instead
         self.assertNotIn("Don't remove anything", text)
@@ -486,8 +535,16 @@ class DryRunTests(unittest.TestCase):
         self.assertNotIn(SAVED, text)
         self.assertNotIn("Asking Docker", text)
         self.assertEqual(docker_commands(text), [RUN_ONE_LINE.replace("=PW ", "=PASSWORD ")])
+        # It says what a real run does first, before the command, and what this run left undone, after it.
+        self.assertIn("a real run first asks Docker whether a database named dewey-db already exists", text)
+        self.assertIn("with a password in place of PASSWORD", text)
+        self.assertIn("This dry run asks Docker nothing, makes no password and saves nothing about the database.", text)
+        self.assertLess(text.index("a real run first asks Docker"), text.index("docker run"))
+        self.assertLess(text.index("docker run"), text.index("saves nothing about the database"))
         result, text = offer({}, None, dry_run=True, new_password=False)
         self.assertEqual(result, {"DATABASE_URL": ""})
+        self.assertIn("a real run first asks Docker", text)
+        self.assertIn("saves nothing about the database", text)
 
     def test_the_postgres_question_passes_the_dry_run_on(self):
         result, text, looks = postgres_question({}, [], ["docker"], dry_run=True, new_password=False)
@@ -688,6 +745,13 @@ class LookAtDockerTests(unittest.TestCase):
             self.assertEqual(install.look_at_docker(), look("unknown"))  # a non-zero exit: its output is not read
         self.assertEqual(out.getvalue(), "")
 
+    def test_a_listing_that_hangs_is_given_up_on_within_a_minute(self):
+        # A person is waiting at the wizard. Each listing gets long enough for a Docker that is still
+        # waking up (install.py's note: Docker Desktop can take 3 to 10 seconds), and not so long
+        # that the wizard looks stuck.
+        self.assertGreaterEqual(install.DOCKER_LOOK_TIMEOUT, 10)
+        self.assertLessEqual(install.DOCKER_LOOK_TIMEOUT, 60)
+
 
 class DocsAgreeTests(unittest.TestCase):
     """docs/INSTALL.md and docker-compose.yml say what the wizard does."""
@@ -720,11 +784,28 @@ class DocsAgreeTests(unittest.TestCase):
         shown = (silent + offer({}, look("running"))[1] + offer({}, look("absent", volume=True))[1]
                  + offer({"POSTGRES_PASSWORD": SAVED}, look("running"))[1])
         for phrase in ("no saved password", "it still has the volume dewey-db-data", "Docker didn't answer",
-                       "Start Docker, then look again?", "Is it running? (y/N)",
-                       "It doesn't use the volume dewey-db-data"):
+                       "Start Docker, then look again?", "Is it running? (y/N)", OLDER):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, shown)
                 self.assertIn(f"`{phrase}", self.guide)
+
+    def test_the_wizard_names_an_older_container_the_way_the_guide_says(self):
+        # "An older dewey-db" quotes the wizard so that readers can tell which kind of database they
+        # have. The quote has to be said on both paths that find such a container: with a saved
+        # password, and without one (where the wizard used to say nothing about it).
+        section = self.guide.split("<summary>An older dewey-db</summary>", 1)[1].split("</details>", 1)[0]
+        self.assertIn(f"`{OLDER}`", section)
+        for cur in ({}, {"POSTGRES_PASSWORD": SAVED}):
+            with self.subTest(saved=sorted(cur)):
+                self.assertIn(OLDER, offer(cur, look("running"), new_password=False)[1])
+
+    def test_only_the_docker_answer_looks_at_docker(self):
+        # The same section tells readers to check for themselves, because with any other answer to
+        # the Postgres question the wizard doesn't look at Docker, even when Docker is installed.
+        result, _, looks = postgres_question({}, [], ["yes"], [ELSEWHERE], new_password=False)
+        self.assertEqual((result, looks), ({"DATABASE_URL": ELSEWHERE}, 0))
+        result, _, looks = postgres_question({}, [], ["later"], new_password=False)
+        self.assertEqual((result, looks), ({"DATABASE_URL": ""}, 0))
 
     def test_the_readme_says_how_to_start_the_database_again(self):
         readme = (REPO / "README.md").read_text(encoding="utf-8")

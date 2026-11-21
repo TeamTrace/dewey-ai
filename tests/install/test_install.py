@@ -649,6 +649,10 @@ class WizardImportTests(unittest.TestCase):
         self.assertEqual(status, 0, out)
         self.assertIn("no saved password", out)
         self.assertIn('"The database container already exists" in docs/INSTALL.md', out)
+        # No dewey-db-data among its mounts: the wizard says here too that it is the older kind, in
+        # the words the guide quotes, so that nobody takes it for one whose files outlive it.
+        self.assertIn("doesn't use the volume dewey-db-data", out)
+        self.assertIn('"An older dewey-db" in docs/INSTALL.md', out)
         self.assertNotIn("docker run", out)
         self.assertNotIn("docker rm", out)  # removal commands are in the guide, after its warning
         self.assertNotIn("Is it running", out)

@@ -630,6 +630,12 @@ def offer_pgvector_container(cur: Optional[dict] = None, look: Optional[DockerLo
         say("  a database keeps the password it was created with.")
         if not running:
             say(f"  The container isn't running: Docker reports it as \"{state}\".")
+        if not look.uses_volume:
+            # Said on this path too, not only under "About this database" below: docs/INSTALL.md
+            # tells people these are the words for an older container. No command here, only text.
+            say("  The container doesn't use the volume dewey-db-data, so it was made by an earlier version")
+            say('  of this wizard or by hand. "An older dewey-db" in docs/INSTALL.md explains what that')
+            say("  means for restarts and for its data.")
         say("   - If you know the database's address, type it at the next prompt. For a database this")
         say("     wizard helped make, it is this line, with the password in place of PASSWORD:")
         say("         " + docker_database_url("PASSWORD"))
