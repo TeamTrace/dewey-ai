@@ -137,7 +137,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        documents = load_documents()
+        documents = load_documents(DATA_FOLDER)
     except ConflictingIdsError as e:
         print(f"❌ {e}")
         sys.exit(1)

@@ -77,7 +77,10 @@ class StdioClientTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_started_like_an_agent_does(self):
         # Agents start the server from their own folder, with only the variables in their config.
-        env = {"PATH": server_env()["PATH"], "DEWEY_MCP_TEST_STACK": "1", "DEWEY_MCP_TOKEN": "", "PYTHONUNBUFFERED": "1"}
+        # NEWSROOM_NAME normally comes from the repo's .env, which the server finds from any folder;
+        # it is set here because a fresh checkout (CI) has no .env and the server requires the name.
+        env = {"PATH": server_env()["PATH"], "DEWEY_MCP_TEST_STACK": "1", "DEWEY_MCP_TOKEN": "", "PYTHONUNBUFFERED": "1",
+               "NEWSROOM_NAME": "The Example Times"}
         with tempfile.TemporaryDirectory() as cwd, tempfile.TemporaryFile("w+") as errlog:
             params = StdioServerParameters(command=PYTHON, args=[str(SERVER)], env=env, cwd=cwd)
             async with stdio_client(params, errlog=errlog) as (read, write):
