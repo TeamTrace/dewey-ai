@@ -1130,5 +1130,105 @@ class EndOfWizardTests(TempRootTestCase):
         self.assertEqual(install.ENV_PATH.parent, self.root)
 
 
+# ------------------------------------------- what the guides say about these screens
+
+class WrittenDownTests(TempRootTestCase):
+    """The guides quote these screens, and the wizard names parts of the guides. Both have to stay
+    true: people search a guide for the line they see, and follow the wizard's pointers."""
+
+    def read(self, *path):
+        return REPO.joinpath(*path).read_text(encoding="utf-8")
+
+    def section(self, text, heading):
+        """The text under a heading, up to the next heading of its level or above."""
+        self.assertIn(f"\n{heading}\n", text)
+        level = len(heading.split(" ")[0])
+        return re.split(rf"\n#{{1,{level}}} ", text.split(f"\n{heading}\n", 1)[1])[0]
+
+    def test_the_wizard_points_to_parts_of_the_guides_that_are_there(self):
+        source = (REPO / "install.py").read_text(encoding="utf-8")
+        install_guide = self.read("docs", "INSTALL.md")
+        # After a pip error on a Python newer than the tested ones.
+        self.assertIn("see Troubleshooting in docs/INSTALL.md", source)
+        troubleshooting = self.section(install_guide, "## Troubleshooting")
+        self.assertIn("| `No matching distribution found for voyageai", troubleshooting)
+        # After app/setup.py has finished.
+        self.assertIn("(Build the search index, in docs/AZURE.md)", source)
+        self.assertRegex(self.section(self.read("docs", "AZURE.md"), "## Build the search index"),
+                         r"lines containing `Error` or `Failed`")
+        # The "get your articles into data/" step, and the line above the MCP example.
+        self.assertIn("docs/IMPORTING.md explains how", source)
+        self.assertIn("\n## Run an import\n", self.read("docs", "IMPORTING.md"))
+        self.assertIn("full recipes for each client: docs/MCP.md", source)
+        self.assertIn("\n## Client recipes\n", self.read("docs", "MCP.md"))
+
+    def test_the_install_guide_quotes_what_the_wizard_prints(self):
+        guide = self.section(self.read("docs", "INSTALL.md"), "### What the wizard asks")
+        self.articles()
+        where = computer("dewey")
+        with mock.patch.object(install, "in_virtualenv", return_value=True), \
+                mock.patch.object(install, "python_situation", return_value=where), \
+                mock.patch.object(install, "run", return_value=False):
+            with probe(here=EVERYTHING):
+                _, skipped, _ = wizard(install.install_dependencies, OPEN_LOCAL, answers=["n"])
+                _, pip_error, install_questions = wizard(install.install_dependencies, OPEN_LOCAL, answers=[""])
+                _, refused, _ = wizard(install.index_archive, OPEN_LOCAL)
+                _, example, _ = wizard(install.print_mcp_next_steps, OPEN_LOCAL, where)
+            with probe(here=()):
+                _, nothing_to_do, _ = wizard(install.install_dependencies, OPEN_LOCAL, answers=["n"])
+                _, asked_first, index_questions = wizard(install.index_archive, OPEN_LOCAL, answers=[""])
+                _, failed, _ = wizard(install.index_archive, OPEN_LOCAL, answers=["y"])
+        for quoted, printed in (("This Python does not have Dewey's packages yet", skipped),
+                                ("This Python already has Dewey's packages", nothing_to_do),
+                                ("pip stopped with an error", pip_error),
+                                ("The indexer cannot run with this Python", refused),
+                                ("so it starts only if you type y.", asked_first),
+                                ("The indexer stopped with an error", failed),
+                                ("The commands below will not work until the packages Dewey needs are installed",
+                                 example)):
+            with self.subTest(quoted=quoted):
+                self.assertIn(quoted, printed)
+                self.assertIn(f"`{quoted}`", guide)
+        self.assertIn("`Index them now? (y/N):`", guide)
+        self.assertEqual(index_questions, ["Index them now? (y/N): "])
+        self.assertIn("`Install requirements.txt now?`", guide)
+        self.assertEqual(install_questions, ["Install requirements.txt now? (Y/n): "])
+        self.assertIn("change command: and the HTTP command", flat(example))
+        self.assertIn("change `command:` and the HTTP command", guide)
+        # The guide's old advice, which the wizard now follows by itself.
+        self.assertNotIn("Answer no if you skipped installing the packages", guide)
+        self.assertNotIn("but not indexing you turned down", guide)
+
+    def test_the_guide_names_the_indexing_commands_next_steps_lists(self):
+        guide = self.section(self.read("docs", "INSTALL.md"), "### What the wizard asks")
+        self.articles()
+        for values, command in ((OPEN_LOCAL, "python app/setup_postgres.py"), (AZURE, "python app/setup.py")):
+            with self.subTest(values=values), probe():
+                (step,) = install.remaining_steps(values, [], "declined", computer("dewey"))
+                self.assertEqual(commands(step), [command])
+                self.assertIn(f"`{command}`", guide)
+
+    def test_the_troubleshooting_table_has_the_lines_people_will_search_for(self):
+        table = self.section(self.read("docs", "INSTALL.md"), "## Troubleshooting")
+        (row,) = [line for line in table.splitlines() if "`This Python does not have Dewey's packages yet`" in line]
+        self.assertIn("`The indexer cannot run with this Python`", row)
+        self.assertIn("Next steps", row)
+
+    def test_the_mcp_guide_says_which_python_the_example_names(self):
+        guide = self.read("docs", "MCP.md")
+        recipes = flat(self.section(guide, "## Client recipes").split("\n### ")[0])
+        self.assertIn("names a Python that has Dewey's packages", recipes)
+        self.assertIn("change `command:` to the Python that has them", recipes)
+        self.assertNotIn("correctly if you ran it with the virtual environment on", recipes)
+        self.assertRegex(self.section(guide, "## Troubleshooting"),
+                         r"`ModuleNotFoundError` there means `command` names")
+
+    def test_the_readme_says_why_the_answer_is_no_and_where_the_command_is(self):
+        (paragraph,) = [line for line in self.read("README.md").splitlines()
+                        if "**When it asks `Index them now?`, type `y`:**" in line]
+        self.assertIn("the default is No, because indexing can cost money or take a while", paragraph)
+        self.assertIn("the wizard's last screen shows the command", paragraph)
+
+
 if __name__ == "__main__":
     unittest.main()

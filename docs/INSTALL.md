@@ -707,7 +707,7 @@ cd $HOME\dewey-ai
 .venv\Scripts\Activate.ps1
 ```
 
-Signs you forgot: no `(.venv)` in the prompt, `zsh: command not found: python` (Linux: `bash: python: command not found`; Windows: `Python was not found`) or `ModuleNotFoundError`. Your AI tool doesn't need it: it starts Dewey with the environment's own Python.
+Signs you forgot: no `(.venv)` in the prompt, `zsh: command not found: python` (Linux: `bash: python: command not found`; Windows: `Python was not found`), `ModuleNotFoundError`, or the wizard saying `This Python does not have Dewey's packages yet`. Your AI tool doesn't need it: it starts Dewey with the environment's own Python.
 
 ## Run the setup wizard
 
@@ -843,7 +843,9 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 14. **Install Python dependencies.** Press Enter at `Install requirements.txt now? (Y/n):` (the `$` lines are commands it runs itself: don't type them). For local search models, answer the double negative `Does this machine lack an NVIDIA GPU?` with `Y` on a Mac or Windows. On Linux, answer `Y` unless you have an NVIDIA RTX 20 or GTX 16 series card or newer with driver 580 or newer ([details](STACKS.md#local-search-models)).
 
-    If it says `You're not in a virtual environment.` instead, press Enter (no), then Control+C: your answers are already in `.env`. [Turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each answer.
+    If it says `You're not in a virtual environment.` instead, press Enter (no) at `Install into the current Python anyway? (y/N):`. Unless that Python happens to have Dewey's packages, the wizard then says `This Python does not have Dewey's packages yet`, doesn't offer to index, and lists what to do under Next steps. Your answers are already in `.env`: let it finish (importing works without the packages) or press Control+C, then [turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each answer.
+
+    If you answer `n` at `Install requirements.txt now?`, the wizard says the same about this Python, or `This Python already has Dewey's packages` when there was nothing to install. If pip fails, it says `pip stopped with an error`: pip's own message, just above that line, says why ([Troubleshooting](#troubleshooting) has the common ones). To try again, run the wizard again.
 
 15. **Check credentials and services** (only when nothing is missing): a result for each service ([what to look for](#check-that-it-worked)). It skips a Voyage key (checking "would make a billed API call") and Azure. For an `ant auth login` sign-in it prints `Claude sign-in: not checked`: it tests only an API key.
 
@@ -851,9 +853,9 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
     If you choose `change`, the wizard also asks for extra importer options, such as `--date-format '%m/%d/%Y'`. On Windows, type them without quotes (`--date-format %m/%d/%Y`); there, options with spaces work only if you run the importer yourself ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)).
 
-17. **Index your archive** (asked only when no setting is missing and `data/` has article files). **`Index them now? (y/N):` defaults to no: type `y`.** [Indexing](GLOSSARY.md#indexing) takes a while, and with Voyage AI it costs money. Answer no if you skipped installing the packages. On `azure`, the same question runs `python app/setup.py` ([AZURE.md](AZURE.md#build-the-search-index)).
+17. **Index your archive** (asked only when no setting is missing, `data/` has article files and the Python running the wizard has Dewey's packages). **`Index them now? (y/N):` defaults to no: type `y`.** Pressing Enter never starts it: [indexing](GLOSSARY.md#indexing) takes a while, and with Voyage AI or Azure it costs money. The line above the question says which applies to your setup, and ends `so it starts only if you type y.` If the packages are missing, the wizard doesn't ask: it says `The indexer cannot run with this Python`, and Next steps says what to do. If the indexer fails, the wizard says `The indexer stopped with an error`. If you stop it with Control+C, the wizard says so and carries on to Next steps ([what stopping keeps](#if-you-stop-halfway)). On `azure`, the same question runs `python app/setup.py`, and the wizard then reminds you to read its output for `Error` or `Failed` ([AZURE.md](AZURE.md#build-the-search-index)).
 
-18. **Next steps.** It lists what's left to do, but not indexing you turned down at step 17 ([Check that it worked](#check-that-it-worked), step 2). On Windows, its Hermes Agent example needs single quotes around your paths, not double ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)); [MCP.md](MCP.md#client-recipes) has complete recipes.
+18. **Next steps.** A numbered list of what's left, in the order to do it: settings to fill in, packages to install, articles to import, and the indexing command whenever indexing didn't finish in this run (`python app/setup_postgres.py`; on `azure`, `python app/setup.py`). When nothing is left, there is no list. Below it, the AI-tool example names a Python that has Dewey's packages: the one that ran the wizard, or else the one in the Dewey folder's `.venv`. If neither has them yet, it says `The commands below will not work until the packages Dewey needs are installed`, names the Python the listed steps install them into, and says to change `command:` and the HTTP command if you install them somewhere else. On Windows, its Hermes Agent example needs single quotes around your paths, not double ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)); [MCP.md](MCP.md#client-recipes) has complete recipes.
 
 <details><summary>Sources</summary>
 
@@ -906,7 +908,7 @@ Your computer's section and the wizard's screens give the other download sizes.
    ```text
    🎉 Indexed 41 article(s) as 188 chunk(s).
    ```
-   If you skipped it, run it now. On every setup except Azure:
+   If you skipped it, or the wizard couldn't run it, run it now (the wizard's Next steps shows the same command). On every setup except Azure:
    ```bash
    python app/setup_postgres.py
    ```
@@ -1180,6 +1182,7 @@ Find the message you see. Fixes with several commands come after the table.
 | `error: externally-managed-environment` | pip ran outside the environment: turn it on. Never add `--break-system-packages`. |
 | `CERTIFICATE_VERIFY_FAILED` | Mac with python.org's Python: in the Finder, open Applications, then Python 3.13, and double-click Install Certificates.command. |
 | `[notice] A new release of pip is available: 26.2.2 -> 26.3` | Ignore it if the first number is 26.2.2 or higher; if lower, run step 4 of [Create a virtual environment](#create-a-virtual-environment). |
+| `This Python does not have Dewey's packages yet`, or `The indexer cannot run with this Python` (the wizard) | The wizard ran outside the virtual environment, or its install was skipped or failed. Do what its Next steps lists: usually, [turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter at `Install requirements.txt now?`. |
 | `ModuleNotFoundError` | Turn the environment on; if it's on, run `python -m pip install -r requirements.txt`. For `torch` or `sentence_transformers`, also install the local search models ([STACKS.md](STACKS.md#local-search-models)). |
 | `running scripts is disabled on this system` (Windows) | Do step 5 of [Get your Windows PC ready](#get-your-windows-pc-ready), then activate again. |
 | `py`, `git` or `docker` `is not recognized` (Windows) | Open a new PowerShell window; if it persists, install it. |
