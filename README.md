@@ -131,6 +131,14 @@ Six steps get Dewey running on one computer. If any of this is new to you, follo
 
    Ask questions you already know the answers to first, and check each citation against its article before you rely on an answer. On setups with a paid chat model, each question costs money. More help: [Try the demo page](docs/INSTALL.md#try-the-demo-page). To use Claude Code or another AI tool instead, see [Connect an AI tool](docs/INSTALL.md#connect-an-ai-tool).
 
+**After a restart,** start Docker again: open Docker Desktop, or run `colima start`; on Linux it starts by itself. A database made with the wizard's Docker command is set to start again with Docker, unless you stopped it yourself. If Dewey can't reach its database, start it. On every computer:
+
+```bash
+docker start dewey-db
+```
+
+More, including databases made by an earlier version of the wizard, which stay stopped: [Start Dewey again later](docs/INSTALL.md#start-dewey-again-later).
+
 ## Where to go next
 
 | I want to… | Read |

@@ -550,7 +550,7 @@ Use pgvector 0.8 or newer: with older versions, very selective date or author fi
 
 | Option | What you do | Notes |
 |---|---|---|
-| The setup wizard's Docker container | Choose `docker` at the wizard's database question: it prints a `docker run` command for `pgvector/pgvector:pg18`, with a generated password | Published on [localhost](GLOSSARY.md#localhost) only. About 165 MB to download (Docker Desktop itself is about 570–630 MB), 0.7 GB on disk. It stays stopped after a restart ([INSTALL.md](INSTALL.md#start-dewey-again-later)) |
+| The setup wizard's Docker container | Choose `docker` at the wizard's database question: it prints a `docker run` command for `pgvector/pgvector:pg18`, with a generated password, or uses the `dewey-db` container you already have | Published on [localhost](GLOSSARY.md#localhost) only. About 165 MB to download (Docker Desktop itself is about 570–630 MB), 0.7 GB on disk. One made with the current command starts again when Docker starts, unless you stopped it yourself, and keeps its data in the Docker volume `dewey-db-data`; one made by an earlier version of the wizard stays stopped after a restart ([INSTALL.md](INSTALL.md#start-dewey-again-later)) |
 | Homebrew, on a Mac | `brew install postgresql@18 pgvector` | Apple silicon only; about 80 MB. Steps below |
 | Postgres.app, on a Mac | Download "Postgres.app with PostgreSQL 18" | Includes pgvector 0.8.7; about 123 MB. Steps below |
 | Linux packages | PostgreSQL's own apt repository, or Fedora's packages | Ubuntu 24.04's own pgvector (0.6.0) is too old. Steps below |

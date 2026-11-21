@@ -874,7 +874,7 @@ November 2026.
 |---|---|
 | A stdio client says the server failed to start or disconnected, or `claude mcp list` shows `✘ Failed to connect` | Run the server by hand ([Before you start: stdio](#before-you-start-stdio), step 3) to see its message |
 | `dewey-mcp: configuration error` names a chat-model setting, though you only search | The server needs those settings to start ([The two tools](#the-two-tools)) |
-| A tool call fails with "a problem on the Dewey server ... reference ..." | Find that reference in the server's log (stderr; `docker compose logs dewey`). On Claude, also look for `could not confirm a Claude credential` where the server started |
+| A tool call fails with "a problem on the Dewey server ... reference ..." | Find that reference in the server's log (stderr; `docker compose logs dewey`). On your own computer after a restart, first check that the database is running ([INSTALL.md](INSTALL.md#start-dewey-again-later)). On Claude, also look for `could not confirm a Claude credential` where the server started |
 | `docker compose up` stops with `required variable DEWEY_MCP_TOKEN is missing a value` | Add `DEWEY_MCP_TOKEN` to `.env` ([how](#before-you-start-http)) |
 | `401` | The token is missing or wrong (header: `Authorization: Bearer YOUR_TOKEN`). Check Open WebUI's Key field, or the variable Hermes or LibreChat reads |
 | The client offers to "log in" or "authenticate" to Dewey | Dewey has no OAuth sign-in, so the header is missing or the token is wrong. In LibreChat, set `requiresOAuth: false` |

@@ -263,7 +263,7 @@ These steps are for Windows 11 and Windows PowerShell, with Windows 10 differenc
 Neither has been tested with Dewey.
 
 - **Rancher Desktop** (Apache 2.0) supports Windows 11, including Home (its page doesn't list Windows 10), and needs WSL installed first. Choose the **dockerd (moby)** container engine, which gives you the `docker` command the wizard looks for. Kubernetes is on by default; Dewey doesn't need it, and turning it off saves memory.
-- **Podman Desktop** (Apache 2.0) supports Windows 10 build 19043 or later and Windows 11, and needs administrator rights. It has no `docker` command for the wizard to find, so start the database yourself: `podman run` with the wizard's options and the image `docker.io/pgvector/pgvector:pg18`. Then answer `yes` at the wizard's Postgres question and enter `postgresql://dewey:YOURPASSWORD@127.0.0.1:5432/dewey`, with letters and digits only in YOURPASSWORD.
+- **Podman Desktop** (Apache 2.0) supports Windows 10 build 19043 or later and Windows 11, and needs administrator rights. It has no `docker` command for the wizard to find, so start the database yourself: `podman run` with the options of the wizard's command ([What the wizard asks](#what-the-wizard-asks), step 8) and the image `docker.io/pgvector/pgvector:pg18`. Two of those options, `--restart unless-stopped` and `-v dewey-db-data:/var/lib/postgresql`, haven't been checked with Podman. Then answer `yes` at the wizard's Postgres question and enter `postgresql://dewey:YOURPASSWORD@127.0.0.1:5432/dewey`, with letters and digits only in YOURPASSWORD.
 
 </details>
 
@@ -798,11 +798,11 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 8. **Postgres with pgvector (where your archive is stored and searched).** Answer `yes` and paste its address (typed hidden) if you have a database, `docker` to get a command that starts one, or `later` (Dewey can't index or answer without one). `docker` is offered only if the wizard finds Docker. If you installed Docker after opening this window, press Control+C (nothing is saved yet), open a new window, [turn the environment on](#turn-it-on-in-every-new-terminal-window) and run the wizard again.
 
-   **If you choose `docker`:** the wizard prints four lines, starting with `docker run -d --name dewey-db`, with a password it made up. On macOS and Linux, select all four with your mouse, copy them (Command+C on a Mac; on Linux, right-click and Copy), paste them into a new terminal window (Command+N on a Mac; Ctrl+Shift+N in GNOME Terminal and Ptyxis on Linux) and press Enter.
+   **If you choose `docker`:** the wizard first asks Docker whether a [container](GLOSSARY.md#docker) named `dewey-db` already exists. It only looks: it never creates, starts or removes anything. If there is none, it prints five lines, starting with `docker run -d --name dewey-db`, with a password it made up, or the one already saved in `.env`. On macOS and Linux, select all five with your mouse, copy them (Command+C on a Mac; on Linux, right-click and Copy), paste them into a new terminal window (Command+N on a Mac; Ctrl+Shift+N in GNOME Terminal and Ptyxis on Linux) and press Enter.
 
-   On Windows, that form fails in PowerShell. In a new tab (Ctrl+Shift+T; on Windows 10, a second window), paste this line, with the 24 letters and digits after `POSTGRES_PASSWORD=` in the wizard's printout in place of PASSWORD_FROM_WIZARD:
+   On Windows, that form fails in PowerShell. In a new tab (Ctrl+Shift+T; on Windows 10, a second window), paste this line, with the letters and digits after `POSTGRES_PASSWORD=` in the wizard's printout in place of PASSWORD_FROM_WIZARD:
    ```powershell
-   docker run -d --name dewey-db -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey -e POSTGRES_PASSWORD=PASSWORD_FROM_WIZARD -p 127.0.0.1:5432:5432 pgvector/pgvector:pg18
+   docker run -d --name dewey-db --restart unless-stopped -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey -e POSTGRES_PASSWORD=PASSWORD_FROM_WIZARD -v dewey-db-data:/var/lib/postgresql -p 127.0.0.1:5432:5432 pgvector/pgvector:pg18
    ```
    The first time, Docker downloads the database image (about 165 MB). You should see something like:
    ```text
@@ -814,9 +814,15 @@ You see only the screens your setup needs, in this order. A bracketed value such
    ```bash
    docker logs dewey-db
    ```
-   Wait until `PostgreSQL init process complete; ready for start up.` is followed by `database system is ready to accept connections` (if not, run it again a few seconds later). Then go back to the wizard's window and answer `Y` at `Is it running? (Y/n):`. **Don't answer `n`:** the next run's new password won't match this container. The wizard saves the address and password (your shell's history also keeps the pasted password). The database listens on 127.0.0.1 only, so your network can't reach it (on Linux, with Docker 28.0 or newer).
+   Wait until `PostgreSQL init process complete; ready for start up.` is followed by `database system is ready to accept connections` (if not, run it again a few seconds later). Then go back to the wizard's window and answer `Y` at `Is it running? (Y/n):`. The wizard saves the address and password (your shell's history also keeps the pasted password). If you answer `n`, it keeps the password in `.env` but writes no address, so the next run prints the same command, or finds the container if you started it meanwhile. The database listens on 127.0.0.1 only, so your network can't reach it (on Linux, with Docker 28.0 or newer).
 
-   Tested so far: this command made the November 2026 test database, with Colima on a Mac. No automated test covers it.
+   The command's `--restart unless-stopped` makes the database start again when Docker starts, unless you stopped it yourself ([Docker's restart policies](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md)). Its `-v dewey-db-data:/var/lib/postgresql` keeps the database's files in a Docker volume named `dewey-db-data`, which stays if the container is removed ([Docker's volumes](https://github.com/docker/docs/blob/main/content/manuals/engine/storage/volumes.md); [where the image keeps its data](https://github.com/docker-library/docs/blob/master/postgres/content.md)). This `dewey-db` is separate from the `db` database that Docker Compose runs ([DEPLOYMENT.md](DEPLOYMENT.md#what-the-compose-file-runs)): an archive indexed in one isn't in the other.
+
+   **If `dewey-db` already exists,** the wizard prints no `docker run` command: the name is taken, and a database keeps the password it was created with. With that password saved in `.env`, the wizard uses the container if it's running, and prints `docker start dewey-db` if it isn't. With `no saved password`, it doesn't make one up: it asks for the database's address instead (press Enter if you don't know it) and points to "The database container already exists" under [Troubleshooting](#troubleshooting). When the container is gone but its files are left (`it still has the volume dewey-db-data`), the wizard prints the command only if `.env` has the password: those files keep the one they were created with.
+
+   **If Docker doesn't answer** (it isn't running, or your account needs `sudo` for it), the wizard says `Docker didn't answer` and asks `Start Docker, then look again? (Y/n):`. Start Docker, then press Enter. If Docker still doesn't answer, the wizard prints the command anyway and asks `Is it running? (y/N):`. Type `y` only once the database is running: until then the wizard saves nothing about it, not even a new password. With `--dry-run`, the wizard asks Docker nothing and shows the command with PASSWORD in place of a password.
+
+   Tested so far: with Colima on a Mac (November 2026). Not tested: restarting the computer to see the database come back by itself. Automated tests cover what the wizard prints and saves, with a stand-in for Docker; none starts a real database.
 
 9. **Azure.** Its 11 questions are explained in [AZURE.md](AZURE.md#with-the-setup-wizard), which also covers importing ([AZURE.md](AZURE.md#prepare-your-articles)).
 
@@ -1076,30 +1082,34 @@ After a restart, start the parts that don't come back by themselves:
 
 1. **Docker:** open Docker Desktop and wait until it's running (to have it open at login, turn on Settings > General > "Start Docker Desktop when you sign in to your computer"), or run `colima start`. Linux's Docker Engine starts by itself.
 
-2. **The database,** which stays stopped after a restart (this works in PowerShell too):
+2. **The database.** One made with the wizard's current command starts again when Docker starts, unless you stopped it yourself (we haven't restarted a computer to watch this happen). To check (this works in PowerShell too):
+   ```bash
+   docker ps
+   ```
+   If no line ends in `dewey-db`, start it:
    ```bash
    docker start dewey-db
    ```
-   It prints `dewey-db`, and `docker ps` should show it `Up` (your archive is kept). To start it with Docker from now on, run `docker update --restart unless-stopped dewey-db` once.
+   It prints `dewey-db` (your archive is kept). A `dewey-db` made by an earlier version of the wizard stays stopped after every restart, until you run `docker update --restart unless-stopped dewey-db` once: see "An older dewey-db" under [Troubleshooting](#troubleshooting).
 
 3. **Ollama** (fully open setup): open the app on a Mac; Windows and Linux start it by themselves. `ollama -v` prints `Warning: could not connect to a running Ollama instance` when it isn't running.
 
 4. **The demo page,** if you want it: [turn on the virtual environment](#turn-it-on-in-every-new-terminal-window) and run `python app/main.py`. Your AI tool needs nothing.
 
-**Keep your archive safe.** To bring the database back, use `docker start dewey-db`, never the wizard's `docker run` command again: a new container starts empty. These delete your indexed archive, or leave it where Dewey can't find it:
+**Keep your archive safe.** A database made with the wizard's current command keeps its files in a Docker volume named `dewey-db-data`, outside the container. If the container is removed (`docker rm dewey-db`, or `docker system prune` while it's stopped), the files stay: run the wizard again, choose `docker` and paste its command, which makes a new container on the same volume, with your archive in it. These still delete the archive:
 
-- `docker rm -v dewey-db`
-- `docker system prune` while `dewey-db` is stopped
-- `docker volume prune` after the container is gone
+- `docker volume rm dewey-db-data`, or `docker volume prune --all`, after the container is gone
 - Docker Desktop's Clean up data, and Reset to factory defaults
 - uninstalling Docker Desktop
 - `colima delete` (its help warns "This deletes everything"), above all with `--data`
+
+A `dewey-db` made by an earlier version of the wizard has no named volume ("An older dewey-db" under [Troubleshooting](#troubleshooting)), so these also delete its archive, or leave it where Dewey can't find it: `docker rm -v dewey-db`, `docker system prune` while it's stopped, and `docker volume prune` after the container is gone. For one of those, bring the database back with `docker start dewey-db`, never by removing the container and pasting the wizard's `docker run` command: the new container starts empty.
 
 If that happens, start a new database and index again.
 
 <details><summary>Sources</summary>
 
-Checked November 2026: Docker's pages on [Docker Desktop's settings](https://github.com/docker/docs/blob/main/content/manuals/desktop/settings-and-maintenance/settings.md) (start at sign-in, off by default), [starting containers automatically](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md) (`docker update --restart`), [`docker rm`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_rm.md), [`docker system prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/system_prune.md), [`docker volume prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/volume_prune.md), [troubleshooting](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/troubleshoot/_index.md) (Clean up data), the [Mac FAQ](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/faqs/macfaqs.md) and [uninstalling](https://github.com/docker/docs/blob/main/content/manuals/desktop/uninstall.md); and `colima delete --help` (Colima 0.10.3).
+Checked November 2026: Docker's pages on [Docker Desktop's settings](https://github.com/docker/docs/blob/main/content/manuals/desktop/settings-and-maintenance/settings.md) (start at sign-in, off by default), [starting containers automatically](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md) (`docker update --restart`), [`docker rm`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_rm.md), [`docker system prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/system_prune.md), [`docker volume prune`](https://github.com/docker/cli/blob/master/docs/reference/commandline/volume_prune.md), [`docker volume rm`](https://github.com/docker/cli/blob/master/docs/reference/commandline/volume_rm.md), [`docker update`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_update.md), [volumes](https://github.com/docker/docs/blob/main/content/manuals/engine/storage/volumes.md), [troubleshooting](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/troubleshoot/_index.md) (Clean up data), the [Mac FAQ](https://github.com/docker/docs/blob/main/content/manuals/desktop/troubleshoot-and-support/faqs/macfaqs.md) and [uninstalling](https://github.com/docker/docs/blob/main/content/manuals/desktop/uninstall.md); and `colima delete --help` (Colima 0.10.3).
 
 </details>
 
@@ -1173,8 +1183,11 @@ Find the message you see. Fixes with several commands come after the table.
 | `ensurepip is not available`, or `ensurepip` ... `returned non-zero exit status 1.` (Linux) | Run `sudo apt install python3.13-venv` (Ubuntu 24.04: `python3.12-venv`), then recreate the environment (below). |
 | `permission denied while trying to connect to the` Docker API or daemon socket (Linux) | Do step 6 of [Get your Linux computer ready](#get-your-linux-computer-ready) and log in again, or put `sudo` in front. |
 | `Cannot connect to the Docker daemon at` ... `Is the docker daemon running?`, or (Docker 29 and later) `failed to connect to the docker API at` ... `check if the path is correct and if the daemon is running` | Start Docker (Docker Desktop, `colima start`, or on Linux `sudo systemctl enable --now docker`), wait, then try again. |
-| `Conflict. The container name "/dewey-db" is already in use` | See "The database container already exists" below. |
-| `password authentication failed for user "dewey"` | `.env` has a newer password than the container: see "The database password doesn't match" below. |
+| `Conflict. The container name "/dewey-db" is already in use` | The database exists already. Don't remove it, even though Docker's message suggests that: see "The database container already exists" below. |
+| The wizard says `no saved password`, or `it still has the volume dewey-db-data` | A database exists whose password isn't in `.env`: see "The database container already exists" below. |
+| The wizard says `Docker didn't answer` | Docker isn't running, or your account needs `sudo` for it. Start Docker, then press Enter at `Start Docker, then look again? (Y/n):`. If you use `sudo` for Docker on Linux, answer `n` there, run the command the wizard prints with `sudo ` in front, and answer `y` at `Is it running? (y/N):` once the database is running. |
+| `password authentication failed for user "dewey"` | `.env` has a different password from the database: see "The database password doesn't match" below. |
+| `Connection refused` on port 5432, or your AI tool reports `a problem on the Dewey server`, after a restart | The database isn't running: start Docker, then run `docker start dewey-db` ([Start Dewey again later](#start-dewey-again-later)). |
 | `port is already allocated`, `ports are not available` or `address already in use` | Another program, often another Postgres, uses port 5432: see "Port 5432 is taken" below. |
 | `Postgres: FAILED:` in the wizard's check | The database isn't running or its address is wrong: [start it](#start-dewey-again-later), then check again. |
 | `Postgres: connected, but pgvector 0.6.0 is older than 0.8` in the wizard's check, or a warning that starts `Dewey: warning: the pgvector extension in this database is version` | Date and byline searches can miss stories until pgvector is upgraded: [STACKS.md](STACKS.md#upgrade-pgvector) has the steps. |
@@ -1250,43 +1263,101 @@ py -3.13 -m venv --clear .venv
 
 <details><summary>The database container already exists</summary>
 
-Not tested by us: these steps come from Docker's documentation and source code. List your containers:
+The wizard looks for a container named `dewey-db` before it prints a command. You are here because Docker said `Conflict. The container name "/dewey-db" is already in use`, or because the wizard said it has `no saved password` for the container, or that `it still has the volume dewey-db-data`. Don't remove the container, even though Docker's message suggests it: your archive may be in it. A database keeps the password it was created with, so either give the wizard that password or give the database a new one. Not tested by us: these steps come from Docker's and the Postgres image's documentation.
 
-```bash
-docker ps -a
-```
+1. **See what's there.**
+   ```bash
+   docker ps -a
+   ```
+   If the `dewey-db` STATUS says `Up`, it's running. If it says `Exited` or `Created`, start it:
+   ```bash
+   docker start dewey-db
+   ```
+   If no line ends in `dewey-db`, only the database's files are left: go to "If only the files are left", below.
 
-If the `dewey-db` STATUS says `Up`, it's already running and you don't need the wizard's command. If it says `Exited` or `Created`, start it:
+2. **If you can find the database's password,** run the wizard again, type `yes` at the Postgres question, and at `Database URL` (typed hidden) enter `postgresql://dewey:PASSWORD@127.0.0.1:5432/dewey`, with the password in place of PASSWORD. Look for it in the earlier copies of your settings, which the wizard keeps in the Dewey folder as `.env.bak-` plus a date and time, and in any other copy of Dewey on this computer. On macOS and Linux (what it finds appears on screen, each line after the name of its file; `no matches found`, or on Linux `No such file or directory`, means there are no such files):
+   ```bash
+   grep -HE 'DATABASE_URL|POSTGRES_PASSWORD' .env.bak-*
+   ```
+   On Windows (PowerShell):
+   ```powershell
+   Select-String -Path .env.bak-* -Pattern 'DATABASE_URL|POSTGRES_PASSWORD'
+   ```
+   In a `DATABASE_URL` line of exactly that shape, the password is between `dewey:` and `@`. If the files differ, the database has the password from the run whose command you pasted, usually the oldest.
 
-```bash
-docker start dewey-db
-```
+3. **If you can't find it, give the database a new password and keep what's in it:** "The database password doesn't match", below.
 
-That container keeps the password from the run that created it, not the one the wizard printed this time. If the wizard saved a database address that time, run the wizard again, answer `yes` at the Postgres question and press Enter to keep the saved address. If it didn't, use "The database password doesn't match". Or, only if nothing has been indexed yet, delete that database with `docker rm -v dewey-db` and paste the wizard's new command.
+4. **Or start again with an empty database,** only if nothing in it matters, for example because nothing was indexed yet. These two commands delete the database and everything indexed in it:
+   ```bash
+   docker rm -f -v dewey-db
+   ```
+   ```bash
+   docker volume rm dewey-db-data
+   ```
+   For a `dewey-db` made by an earlier version of the wizard, the second command reports that there is no such volume, which is fine. Then run the wizard again and choose `docker`.
+
+**If only the files are left** (the wizard said `it still has the volume dewey-db-data`), a new container would use those files, which keep the password they were created with. Choose one:
+
+- Find that password as in step 2. Open `.env` in a text editor and set the database's address, with the password in place of THE_PASSWORD: `DATABASE_URL='postgresql://dewey:THE_PASSWORD@127.0.0.1:5432/dewey'` (change the `DATABASE_URL` line if there is one). Then run the wizard again and type `docker` at the Postgres question: it prints the command that makes a new container on those files. Paste it and answer `Y`.
+- Or keep the files and set a new password: do the same with 20 or more letters and digits of your own as the password. The database still has its old password then, so follow "The database password doesn't match", below, from its step 2.
+- Or delete the files and start empty, only if nothing in them matters: run step 4's second command, then the wizard.
 
 </details>
 
 <details><summary>The database password doesn't match</summary>
 
-This sets the container's password to the one in `.env` and keeps your data. It hasn't been tested by us. First, in the Dewey folder, show the password in `.env` (it appears on screen). On macOS and Linux:
+This gives the database the password that `.env` has, and keeps your data. It hasn't been tested by us. It works without the old password because Postgres asks for none from inside its own container ([the image's documentation](https://github.com/docker-library/docs/blob/master/postgres/content.md)).
+
+1. **Find the password in `.env`,** in the Dewey folder (it appears on screen). On macOS and Linux:
+   ```bash
+   grep -E 'DATABASE_URL|POSTGRES_PASSWORD' .env
+   ```
+   On Windows (PowerShell):
+   ```powershell
+   Select-String -Path .env -Pattern 'DATABASE_URL|POSTGRES_PASSWORD'
+   ```
+   If there is a `DATABASE_URL` of exactly the shape `postgresql://dewey:PASSWORD@127.0.0.1:5432/dewey`, use the password inside it, between `dewey:` and `@`: the wizard uses that one first. Otherwise use the value of `POSTGRES_PASSWORD`, if it has only letters and digits. If `.env` has neither, choose a new password of 20 or more letters and digits; you type it in steps 2 and 3.
+
+2. **Give the database that password.** The database must be running (`docker start dewey-db`). Run this, with the password in place of PASTE_THE_PASSWORD. It works in PowerShell too.
+   ```bash
+   docker exec dewey-db psql -U dewey -d dewey -c "ALTER USER dewey PASSWORD 'PASTE_THE_PASSWORD'"
+   ```
+   Postgres replies `ALTER ROLE`.
+
+3. **Check that `.env` has the database's address.** If the password came from inside `DATABASE_URL`, you're done. If it came from `POSTGRES_PASSWORD`, run the wizard again and choose `docker`: it finds the container and writes the address itself (if it asks `Is it running?`, answer `y`). If you chose a new password, run the wizard again, type `yes` at the Postgres question and enter `postgresql://dewey:PASSWORD@127.0.0.1:5432/dewey` at `Database URL` (typed hidden), with your password in place of PASSWORD.
+
+</details>
+
+<details><summary>An older dewey-db</summary>
+
+Until November 2026 the wizard's command had no `--restart` and no `-v`. A `dewey-db` made that way works, with two differences: it stays stopped after a restart, and its files are in an unnamed Docker volume, which `docker rm -v dewey-db` deletes with the container. When the wizard finds such a container, it says `It doesn't use the volume dewey-db-data`. To check yourself, list Docker's volumes: a database made with the current command has one named `dewey-db-data`.
 
 ```bash
-grep POSTGRES_PASSWORD .env
+docker volume ls
 ```
 
-On Windows (PowerShell):
-
-```powershell
-Select-String -Path .env -Pattern POSTGRES_PASSWORD
-```
-
-Then run this, with the value between the quotes in place of PASTE_PASSWORD_FROM_ENV. It works in PowerShell too.
+**Make it start with Docker.** This changes the container's restart policy and nothing else ([Docker's restart policies](https://github.com/docker/docs/blob/main/content/manuals/engine/containers/start-containers-automatically.md)):
 
 ```bash
-docker exec dewey-db psql -U dewey -d dewey -c "ALTER USER dewey PASSWORD 'PASTE_PASSWORD_FROM_ENV'"
+docker update --restart unless-stopped dewey-db
 ```
 
-Postgres replies `ALTER ROLE`.
+**Then either keep it as it is,** and avoid the three commands under [Keep your archive safe](#start-dewey-again-later) that delete an unnamed volume.
+
+**Or move to a named volume.** Docker can't add a volume to an existing container ([`docker update`](https://github.com/docker/cli/blob/master/docs/reference/commandline/container_update.md) has no option for volumes), so this means a new, empty database and indexing again, which embeds every article again: time with local search models, money with Voyage AI. Not tested by us.
+
+1. Check that your article files are still in `data/`: the new index is built from them.
+2. Remove the old database. This deletes its index:
+   ```bash
+   docker rm -f -v dewey-db
+   ```
+3. Run the wizard and type `docker` at the Postgres question (the suggested answer may be `yes`), paste its command and answer `Y`. It uses the password already in `.env`, or makes a new one.
+4. Index again:
+   ```bash
+   python app/setup_postgres.py
+   ```
+
+If you know Postgres, `pg_dump` before step 2 and `pg_restore` after step 3 carry the index across without embedding again (not tested by us).
 
 </details>
 

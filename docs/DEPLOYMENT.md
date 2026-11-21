@@ -220,7 +220,8 @@ To run two, give the second its own network name, alias and host port in its `do
 | `ollama` | `docker compose --profile ollama up -d` | An Ollama model server for `DEWEY_STACK=open`; never published |
 
 `--profile` turns on an optional service.
-The `db` service is separate from the `dewey-db` container that the [setup wizard](GLOSSARY.md#setup-wizard) can start on your own computer: an index built in one isn't in the other.
+The `db` service is separate from the `dewey-db` container that the [setup wizard](GLOSSARY.md#setup-wizard) helps you start on your own computer: an index built in one isn't in the other.
+If the wizard already wrote a `POSTGRES_PASSWORD` line in `.env`, leave it as it is and let Compose use it too: it holds the password the wizard made for `dewey-db`, and the wizard never changes it.
 
 > [!WARNING]
 > **The `ollama` service needs one more setting, or its answers ignore the question.**
@@ -811,7 +812,7 @@ Set these in `.env`, the Compose file, `fly secrets` or `fly.toml` `[env]`, or t
 | Setting | Default | What it does |
 |---|---|---|
 | `DEWEY_MCP_TOKEN` | required for HTTP | Bearer token clients send: at least 32 letters, digits or `- . _ ~ + /` (and `=` at the end) |
-| `POSTGRES_PASSWORD` | required | Compose only: the bundled Postgres's password, letters and digits |
+| `POSTGRES_PASSWORD` | required | The bundled Postgres's password, letters and digits. The setup wizard writes this line too, when there is none, with the password it makes for its separate `dewey-db` container; it never changes a line that is already there |
 | `INSTALL_LOCAL_MODELS` | `false` | Docker build argument for CPU-only [PyTorch](GLOSSARY.md#pytorch) and the local search models. With Compose, set it in `.env` so rebuilds keep them |
 | `NEWSROOM_NAME` | required ([why](#steps-for-one-server)) | Your newsroom's name; the same on the server and the indexing computer |
 | `ARCHIVE_START_DATE`, `DEFAULT_REGION` | empty | Your earliest article date and region. Empty: Dewey states no start date and assumes no region |

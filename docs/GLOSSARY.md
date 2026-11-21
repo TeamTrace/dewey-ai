@@ -606,7 +606,7 @@ A secret sent with each request to prove the sender may connect (`Authorization:
 
 A tool that runs programs in containers, sealed boxes made from an image (the packaged program). Docker Desktop (Mac and Windows) is free only for personal use, education, non-commercial open source and businesses under 250 employees and $10 million revenue. Docker's summary doesn't mention nonprofits. Colima (Mac) and Docker Engine (Linux) are free.
 
-**In Dewey:** optional. Use Docker Engine 28.0 or newer: older versions can expose ports published on 127.0.0.1 to your local network.
+**In Dewey:** optional. Use Docker Engine 28.0 or newer: older versions can expose ports published on 127.0.0.1 to your local network. The setup wizard's Docker database is a container named `dewey-db`; one made with the current command keeps its files in a volume named `dewey-db-data` (storage that Docker manages outside the container).
 
 **More:** INSTALL.md for your [Mac](INSTALL.md#get-your-mac-ready), [Windows PC](INSTALL.md#get-your-windows-pc-ready) or [Linux computer](INSTALL.md#get-your-linux-computer-ready) · [DEPLOYMENT.md: Why Docker Engine 28.0 or newer](DEPLOYMENT.md#why-docker-engine-280-or-newer)
 

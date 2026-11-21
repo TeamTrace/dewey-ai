@@ -463,13 +463,43 @@ class WizardImportTests(unittest.TestCase):
         at = next(i for i, (_, answer) in enumerate(self.OPEN_STACK) if answer == "later")
         return self.OPEN_STACK[:at] + list(steps) + self.OPEN_STACK[at + 1:]
 
-    def docker_on_path(self):
-        """Make Docker look installed. The wizard only checks that the command exists; if it ever
-        ran it, the stub would leave a note."""
+    # Everything the wizard may ask Docker: these two listings, in this order. It only prints the
+    # commands that change something. Widening the look has to fail a test first: `docker inspect`,
+    # for one, prints the database password.
+    LOOKS = ["ps -a --no-trunc --filter name=dewey-db --format {{.Names}} {{.State}} {{.Mounts}}",
+             "volume ls --filter name=dewey-db-data --format {{.Name}}"]
+
+    def docker_on_path(self, containers="", volumes="", answers=True):
+        """Put a stand-in `docker` on the wizard's PATH (the real one is never reachable from it).
+
+        It notes every call, answers `docker ps` and `docker volume` with the text given here (one
+        line per container: its names, state and mounts; one volume name per line) and fails for
+        anything else. answers=False plays a Docker that is installed but not running. Shell
+        builtins only: the wizard's PATH holds nothing else.
+        """
         self.docker_calls = self.root / "docker-was-run"
+        self.assertNotIn("'", containers + volumes)  # they go into the stub inside single quotes
+        if answers:
+            reply = ('case "$1" in\n'
+                     f"  ps) printf '%s' '{containers}' ;;\n"
+                     f"  volume) printf '%s' '{volumes}' ;;\n"
+                     "  *) exit 64 ;;\n"
+                     "esac\n")
+        else:
+            reply = 'echo "Cannot connect to the Docker daemon. Is the docker daemon running?" >&2\nexit 1\n'
         stub = self.root / "bin" / "docker"
-        stub.write_text(f'#!/bin/sh\necho "$@" >> "{self.docker_calls}"\n')
+        stub.write_text(f'#!/bin/sh\necho "$*" >> "{self.docker_calls}"\n{reply}')
         stub.chmod(0o755)
+
+    def docker_calls_made(self):
+        """The arguments of every call the wizard made to the stand-in docker, one per line."""
+        return self.docker_calls.read_text().splitlines() if self.docker_calls.exists() else []
+
+    def printed_password(self, out):
+        """The password in the one docker run command the wizard printed."""
+        found = re.findall(r"-e POSTGRES_PASSWORD=(\S+) ", out)
+        self.assertEqual(len(found), 1, out)
+        return found[0]
 
     def env_value(self, key):
         """The value .env holds for key, or None if it isn't there."""
@@ -494,14 +524,22 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn("-e POSTGRES_USER=dewey -e POSTGRES_DB=dewey", out)
         self.assertIn(f"-e POSTGRES_PASSWORD={password} ", out)
         self.assertIn("-p 127.0.0.1:5432:5432 pgvector/pgvector:pg18", out)
+        # The database comes back when Docker restarts, and its files outlive the container (#18).
+        # /var/lib/postgresql exactly: Postgres 18 images refuse a new database mounted at .../data.
+        self.assertIn("docker run -d --name dewey-db --restart unless-stopped ", out)
+        self.assertIn("-v dewey-db-data:/var/lib/postgresql ", out)
+        self.assertNotIn("/var/lib/postgresql/data", out)
+        self.assertIn("docker start dewey-db", out)  # how to start it again
+        self.assertIn("separate from the db service in docker-compose.yml", out)
         # That command is the only place the password is shown; the Summary masks it.
         self.assertEqual(out.count(password), 1, out)
         summary = out.split("Summary", 1)[1]
         self.assertIn("POSTGRES_PASSWORD='********'", summary)
         self.assertIn("DATABASE_URL='********'", summary)
-        self.assertFalse(self.docker_calls.exists(), "the wizard prints the command; it must not run Docker")
+        # The wizard looked at Docker, and that is all: the person runs the command, not the wizard.
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
 
-    def test_docker_is_the_suggested_answer_and_saying_it_is_not_running_writes_no_database(self):
+    def test_docker_is_the_suggested_answer_and_answering_no_keeps_the_password_but_writes_no_database_url(self):
         self.docker_on_path()
         out, status = self.wizard(
             # Enter takes the suggested answer: docker, when Docker is installed and no URL is saved.
@@ -512,9 +550,12 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn("start it whenever you like, then re-run this wizard", out)
         self.assertIn("Still missing: DATABASE_URL", out)
         self.assertIsNone(self.env_value("DATABASE_URL"))
-        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        # Docker showed that no dewey-db exists, so the printed command will make one with this
+        # password whenever it is run: it is kept, and the next run prints the same command (#18).
+        self.assertRegex(self.env_value("POSTGRES_PASSWORD") or "", r"^[0-9a-f]{24}$")
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), self.printed_password(out))
         self.assertEqual(self.env_value("DEWEY_STACK"), "open")  # everything else was still written
-        self.assertFalse(self.docker_calls.exists())
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
 
     def test_docker_is_not_offered_when_it_is_not_installed(self):
         out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
@@ -534,6 +575,151 @@ class WizardImportTests(unittest.TestCase):
         self.assertNotIn("s3cretPW9", out)
         self.assertIn("DATABASE_URL='********'", out.split("Summary", 1)[1])
         self.assertNotIn("Still missing", out)
+
+    # --- re-runs of the Docker choice (issue #18): a database keeps the password it was created
+    # with, so the wizard must never pair an existing dewey-db with a password made up later.
+
+    SEED = "0123456789abcdef01234567"  # a password already in .env, the shape the wizard makes
+    KEEP_TOKEN = [("Keep the existing MCP token", "")]  # asked on a re-run, after the newsroom questions
+
+    def docker_url(self, password):
+        return f"postgresql://dewey:{password}@127.0.0.1:5432/dewey"
+
+    def test_a_rerun_after_no_prints_the_same_command_and_then_saves_the_database_url(self):
+        self.docker_on_path()
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, ""), ("Is it running", "n"))
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        password = self.printed_password(out)
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), password)
+        # Second run, Docker still shows nothing: the same command, now with a warning that it
+        # shows a saved password. Enter still suggests docker, because no address is saved yet.
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, ""), ("Is it running", "y"))
+            + self.KEEP_TOKEN + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.printed_password(out), password)
+        self.assertIn("The command below shows the database password saved in .env", out)
+        self.assertEqual(self.env_value("DATABASE_URL"), self.docker_url(password))
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), password)
+        self.assertEqual((self.root / ".env").read_text().count("POSTGRES_PASSWORD="), 1)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS * 2)
+
+    def test_a_stopped_container_with_a_saved_password_is_started_not_recreated(self):
+        (self.root / ".env").write_text(f"POSTGRES_PASSWORD='{self.SEED}'\n")
+        self.docker_on_path(containers="dewey-db exited dewey-db-data\n", volumes="dewey-db-data\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Is it running", "y"))
+            + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("docker start dewey-db", out)
+        self.assertNotIn("docker run", out)  # it would fail on the name, and its password would be wrong
+        self.assertNotIn(self.SEED, out)
+        self.assertEqual(self.env_value("DATABASE_URL"), self.docker_url(self.SEED))
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), self.SEED)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
+
+    def test_a_running_container_with_a_saved_password_is_used_without_a_question(self):
+        (self.root / ".env").write_text(f"POSTGRES_PASSWORD='{self.SEED}'\n")
+        # No dewey-db-data among its mounts: a container made by the earlier command, like the ones
+        # people already have. --filter name= also lists dewey-db-old; only the exact name counts.
+        self.docker_on_path(containers="dewey-db-old exited x\ndewey-db running " + "5f2b" * 16 + "\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"))  # no "Is it running?": Docker said so
+            + self.WRITE_ENV + self.NO_CHECKS + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("docker run", out)
+        self.assertNotIn("Is it running", out)
+        self.assertNotIn(self.SEED, out)
+        self.assertIn("docker update --restart unless-stopped dewey-db", out)
+        self.assertIn("docker start dewey-db", out)
+        self.assertIn('"An older dewey-db" in docs/INSTALL.md', out)
+        self.assertEqual(self.env_value("DATABASE_URL"), self.docker_url(self.SEED))
+        self.assertEqual(self.env_value("POSTGRES_PASSWORD"), self.SEED)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
+
+    def test_an_existing_container_without_a_saved_password_is_never_given_a_new_one(self):
+        # The issue's case: a dewey-db started after answering No to an earlier version of the wizard,
+        # which kept no password. Today's run must not invent one for it.
+        self.docker_on_path(containers="dewey-db running " + "5f2b" * 16 + "\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Database URL", ""))  # Enter: not known
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("no saved password", out)
+        self.assertIn('"The database container already exists" in docs/INSTALL.md', out)
+        self.assertNotIn("docker run", out)
+        self.assertNotIn("docker rm", out)  # removal commands are in the guide, after its warning
+        self.assertNotIn("Is it running", out)
+        self.assertIn("Still missing: DATABASE_URL", out)
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        self.assertEqual(self.docker_calls_made(), self.LOOKS)
+
+    def test_when_docker_does_not_answer_the_wizard_says_so_and_saves_nothing_after_enter(self):
+        self.docker_on_path(answers=False)
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"),
+                                       ("Start Docker, then look again", ""),  # Enter: yes, look again
+                                       ("Is it running", ""))                  # Enter: no, here
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("Docker didn't answer", out)
+        self.assertIn("Docker still didn't answer", out)
+        self.assertIn("docker run -d --name dewey-db --restart unless-stopped ", out)
+        self.assertIn("already in use", out)
+        self.assertIn("(y/N)", out.split("Is it running", 1)[1].split("\n", 1)[0])
+        self.assertIn("isn't saved", out)
+        self.assertIn("Still missing: DATABASE_URL", out)
+        # Nothing about the database is kept: a password no container may ever get must not be
+        # found in .env by the next run and taken for the database's.
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        password = self.printed_password(out)
+        self.assertEqual(out.count(password), 1, out)
+        self.assertNotIn(password, (self.root / ".env").read_text())
+        # The second listing is only asked for once the first one answered.
+        self.assertEqual(self.docker_calls_made(), self.LOOKS[:1] * 2)
+
+    def test_a_password_made_while_docker_was_silent_is_not_trusted_by_the_next_run(self):
+        # Run 1: Docker isn't answering. The person declines to look again and answers n, as the
+        # wizard advises when Docker reports the name dewey-db as taken.
+        self.docker_on_path(answers=False)
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"), ("Start Docker, then look again", "n"),
+                                       ("Is it running", "n"))
+            + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        first_password = self.printed_password(out)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS[:1])
+        # Run 2: Docker answers, and shows the database that held the name all along.
+        self.docker_on_path(containers="dewey-db running " + "5f2b" * 16 + "\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, ""), ("Database URL", ""))
+            + self.KEEP_TOKEN + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("no saved password", out)
+        self.assertNotIn("docker run", out)
+        self.assertIsNone(self.env_value("DATABASE_URL"))
+        self.assertIsNone(self.env_value("POSTGRES_PASSWORD"))
+        self.assert_nowhere(first_password, out)
+        self.assertEqual(self.docker_calls_made(), self.LOOKS[:1] + self.LOOKS)
+
+    def test_a_dry_run_never_asks_docker_and_shows_no_password(self):
+        (self.root / ".env").write_text(f"POSTGRES_PASSWORD='{self.SEED}'\n")
+        self.docker_on_path(containers="dewey-db running dewey-db-data\n", volumes="dewey-db-data\n")
+        out, status = self.wizard(
+            self.with_postgres_answers((self.POSTGRES, "docker"))  # no question follows the command
+            + [(self.WHERE, "skip")], "--dry-run")
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.docker_calls_made(), [])
+        self.assertIn("--dry-run", out.split("Do you have a Postgres database", 1)[1].split("Newsroom", 1)[0])
+        self.assertIn("-e POSTGRES_PASSWORD=PASSWORD ", out)
+        self.assertNotIn(self.SEED, out)
+        self.assertNotIn("Is it running", out)
+        self.assertIn("nothing was written", out)
+        self.assertEqual((self.root / ".env").read_text(), f"POSTGRES_PASSWORD='{self.SEED}'\n")
 
 
 if __name__ == "__main__":

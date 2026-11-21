@@ -63,6 +63,12 @@ LINKS = {
 }
 PGVECTOR_DOCKER_IMAGE = "pgvector/pgvector:pg18"  # tag list: pgvector README, Docker section
 PGVECTOR_CONTAINER = "dewey-db"  # the container name the Postgres step suggests
+# A named volume, so removing the container doesn't delete the index. Postgres 18+ images keep
+# their data under this path, not .../data (their entrypoint refuses a new database mounted
+# there); docker-compose.yml mounts its own volume at the same path.
+PGVECTOR_VOLUME = "dewey-db-data"
+PGVECTOR_MOUNT = "/var/lib/postgresql"
+DOCKER_LOOK_TIMEOUT = 15  # seconds for each question to Docker; Docker Desktop can take 3 to 10 to wake up
 OLLAMA_DEFAULT_URL = "http://localhost:11434/v1"
 OLLAMA_MODEL_SUGGESTIONS = [
     ("qwen3:8b", "Qwen3-8B, 8B parameters, Apache 2.0. Smaller; a reasonable start on a laptop."),
@@ -445,34 +451,321 @@ def ask_open_llm(cur: dict, interactive: bool) -> dict:
     return out
 
 
-def offer_pgvector_container() -> dict:
-    """Print a ready-to-run pgvector container command; return the .env values for it.
+# ------------------------------------------------- the Docker database (dewey-db)
 
-    Returns {} if the user hasn't started it, so the caller can fall back to the
-    list of options. The password is generated rather than hard-coded and the port
-    is published on loopback only, because docker-compose.yml takes the same care
-    and a suggestion that contradicts it teaches the wrong habit.
+def docker_database_url(password: str) -> str:
+    """The address of the database that the wizard's docker run command creates."""
+    return f"postgresql://dewey:{password}@127.0.0.1:5432/dewey"
+
+
+# That address with a password of letters and digits: the only kind that can go unquoted into a
+# shell command and unencoded into a URL.
+_DOCKER_DATABASE_URL = re.compile(r"postgresql://dewey:([A-Za-z0-9]+)@127\.0\.0\.1:5432/dewey")
+
+
+def saved_docker_password(cur: dict) -> tuple:
+    """(password, the .env setting it is in) for the Docker database, or ("", "") when .env has
+    none this wizard can use.
+
+    The password inside a saved DATABASE_URL for that database comes first, because it is what
+    Dewey connects with. POSTGRES_PASSWORD comes second: Docker Compose's own database reads that
+    line too, and the two can differ. Either is evidence, not proof: the docs show people how to
+    type the same address by hand, for databases this wizard never made.
     """
-    password = secrets.token_hex(12)  # 24 characters, letters and digits only
-    say()
-    say("  Run this in another terminal, then come back:")
-    say()
-    say(paint(f"    docker run -d --name {PGVECTOR_CONTAINER} \\", BRAND))
-    say(paint("      -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey \\", BRAND))
-    say(paint(f"      -e POSTGRES_PASSWORD={password} \\", BRAND))
-    say(paint(f"      -p 127.0.0.1:5432:5432 {PGVECTOR_DOCKER_IMAGE}", BRAND))
-    say()
-    say("  That publishes the port on 127.0.0.1 only, so nothing else on your network")
-    say("  can reach it. The password above is generated for you and is written to .env")
-    say("  as POSTGRES_PASSWORD, which docker-compose.yml also needs.")
-    if not ask_yes("  Is it running?", default=True):
-        say("  No problem: start it whenever you like, then re-run this wizard.")
-        return {}
-    return {"DATABASE_URL": f"postgresql://dewey:{password}@127.0.0.1:5432/dewey",
-            "POSTGRES_PASSWORD": password}
+    match = _DOCKER_DATABASE_URL.fullmatch(cur.get("DATABASE_URL", "").strip())
+    if match:
+        return match.group(1), "DATABASE_URL"
+    password = cur.get("POSTGRES_PASSWORD", "").strip()
+    if re.fullmatch(r"[A-Za-z0-9]+", password):
+        return password, "POSTGRES_PASSWORD"
+    return "", ""
 
 
-def ask_postgres(cur: dict, interactive: bool) -> dict:
+def pgvector_run_command(password: str) -> List[str]:
+    """The docker run command that creates the database, as the lines to print.
+
+    docs/INSTALL.md gives the same command on one line, for PowerShell; a test compares the two.
+    """
+    return [
+        f"docker run -d --name {PGVECTOR_CONTAINER} --restart unless-stopped \\",
+        "  -e POSTGRES_USER=dewey -e POSTGRES_DB=dewey \\",
+        f"  -e POSTGRES_PASSWORD={password} \\",
+        f"  -v {PGVECTOR_VOLUME}:{PGVECTOR_MOUNT} \\",
+        f"  -p 127.0.0.1:5432:5432 {PGVECTOR_DOCKER_IMAGE}",
+    ]
+
+
+def say_command(*lines: str) -> None:
+    """A command for the person to copy: set apart, in the accent colour, with nothing else on its lines."""
+    say()
+    for line in lines:
+        say(paint("    " + line, BRAND))
+    say()
+
+
+@dataclass
+class DockerLook:
+    """What Docker shows of the wizard's database."""
+    container: str             # "absent", "unknown" (Docker didn't answer), or Docker's word for its state
+    volume: bool = False       # a volume named dewey-db-data exists
+    uses_volume: bool = False  # the container mounts it; one made by the earlier command doesn't
+
+
+def docker_answer(*args: str) -> Optional[str]:
+    """What `docker ARGS` prints, or None when Docker gives no answer: not installed, not running,
+    not allowed for this account, or too slow. Only for commands that list things.
+
+    Only the exit status says whether it answered (the wording of Docker's errors changes between
+    versions), and stdin is closed so that docker can't read the answers typed for the wizard.
+    """
+    try:
+        done = subprocess.run(["docker", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace",
+                              timeout=DOCKER_LOOK_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def look_at_docker() -> DockerLook:
+    """Ask Docker whether the container dewey-db and the volume dewey-db-data exist.
+
+    Two commands that only list things. Never `docker inspect`: it prints the container's
+    environment, the database password included. `--filter name=` matches every name that
+    contains the text (dewey-db-old too), so the names are compared here.
+    """
+    listed = docker_answer("ps", "-a", "--no-trunc", "--filter", f"name={PGVECTOR_CONTAINER}",
+                           "--format", "{{.Names}} {{.State}} {{.Mounts}}")
+    if listed is None:
+        return DockerLook("unknown")
+    volumes = docker_answer("volume", "ls", "--filter", f"name={PGVECTOR_VOLUME}", "--format", "{{.Name}}")
+    if volumes is None:
+        return DockerLook("unknown")
+    look = DockerLook("absent", volume=PGVECTOR_VOLUME in volumes.split())
+    for line in listed.splitlines():
+        names, state, mounts = (line.split(None, 2) + ["", "", ""])[:3]
+        if PGVECTOR_CONTAINER in names.split(","):
+            look.container = re.sub(r"[^\w-]", "", state) or "not reported"
+            look.uses_volume = PGVECTOR_VOLUME in mounts.split(",")
+    return look
+
+
+def find_docker_database() -> DockerLook:
+    """look_at_docker(), announced, with one offer to look again when Docker doesn't answer: the
+    usual reason is that Docker Desktop or Colima hasn't been started yet."""
+    say("  Asking Docker whether a container named dewey-db already exists...")
+    look = look_at_docker()
+    if look.container != "unknown":
+        return look
+    say("  Docker didn't answer: it may not be running, or this account may need sudo for it.")
+    if ask_yes("  Start Docker, then look again?", default=True):
+        look = look_at_docker()
+        if look.container == "unknown":
+            say("  Docker still didn't answer.")
+    return look
+
+
+def _say_saved_password(lead: str, cur: dict, password: str, source: str, proof: bool = False) -> None:
+    """Say which saved password is in use. It is evidence of the database's password, not proof,
+    unless (proof) the command about to be printed creates the database with it."""
+    other = cur.get("POSTGRES_PASSWORD", "").strip()
+    if source == "POSTGRES_PASSWORD":
+        say(f"  {lead}: the POSTGRES_PASSWORD line.")
+        if not proof:
+            say("  If this wizard's check later reports that password authentication failed, see")
+            say('  "The database password doesn\'t match" in docs/INSTALL.md.')
+    elif other and other != password:
+        say(f"  {lead}: the one inside DATABASE_URL, not the")
+        say("  POSTGRES_PASSWORD line, which is different.")
+    else:
+        say(f"  {lead}: the one inside DATABASE_URL.")
+
+
+def _say_address_change(saved_url: str, url: str) -> None:
+    if saved_url and saved_url != url:
+        say("  .env's DATABASE_URL held a different address: it changes to this database's.")
+        say("  The old one stays in the .env.bak- file this wizard makes when it writes .env.")
+
+
+def offer_pgvector_container(cur: Optional[dict] = None, look: Optional[DockerLook] = None,
+                             dry_run: bool = False) -> Optional[dict]:
+    """The Docker choice: print what the person should run, and return the .env values for it.
+
+    This only prints commands. It never creates, starts, stops or removes anything, and it never
+    prints a command that deletes data: those are in docs/INSTALL.md, after their warnings.
+
+    A database keeps the password it was created with, so a new password is right only for a
+    database that doesn't exist yet. Hence the look at Docker first, and these rules:
+      - no container and no volume: the docker run command, with the saved password or a new one;
+      - a container, or its volume alone, and a saved password: that password, never a new one;
+      - the volume alone and no saved password: no command, and .env stays as it is;
+      - a container and no saved password: None, and the caller asks for the address instead;
+      - no answer from Docker: the command, but a new password is kept only after a yes.
+    POSTGRES_PASSWORD is returned only for a password made here, and never when .env already has
+    one: Docker Compose's own database reads that line too. A "no" returns the saved DATABASE_URL,
+    so that it isn't dropped from .env. Under --dry-run nothing is asked of Docker, and no
+    password is made or shown. `look` lets tests hand in Docker's answer.
+    """
+    cur = cur or {}
+    saved_url = cur.get("DATABASE_URL", "")
+    password, source = saved_docker_password(cur)
+    start = f"docker start {PGVECTOR_CONTAINER}"
+    say()
+    if dry_run:
+        say("  (--dry-run: a real run first asks Docker whether a database named dewey-db already exists.")
+        say("  If there is none yet, it prints this command, with a password in place of PASSWORD.)")
+        say_command(*pgvector_run_command("PASSWORD"))
+        say("  This dry run asks Docker nothing, makes no password and saves nothing about the database.")
+        return {"DATABASE_URL": saved_url}
+    if look is None:
+        look = find_docker_database()
+    state = look.container
+    seen = state != "unknown"                    # Docker answered
+    exists = state not in ("absent", "unknown")  # and showed a container named dewey-db
+    running = state == "running"
+
+    if exists and not password:
+        say("  Docker already has a container named dewey-db, but .env has no saved password this wizard")
+        say("  can use for it, so it can't write the database's address. A new password wouldn't work:")
+        say("  a database keeps the password it was created with.")
+        if not running:
+            say(f"  The container isn't running: Docker reports it as \"{state}\".")
+        say("   - If you know the database's address, type it at the next prompt. For a database this")
+        say("     wizard helped make, it is this line, with the password in place of PASSWORD:")
+        say("         " + docker_database_url("PASSWORD"))
+        if saved_url:
+            say("   - If you don't, press Enter at the next prompt: the address already saved in .env stays.")
+        else:
+            say("   - If you don't, press Enter at the next prompt.")
+        say('     "The database container already exists" in docs/INSTALL.md shows how to find the')
+        say("     password, or how to set a new one and keep what is in the database.")
+        return None
+    if state == "absent" and look.volume and not password:
+        say("  Docker has no container named dewey-db, but it still has the volume dewey-db-data: the")
+        say("  files of an earlier Docker database. A new container would use those files, and they keep")
+        say("  the password they were created with. .env has no saved password this wizard can use")
+        say("  for them, so it prints no command: a new password wouldn't fit.")
+        say('  "The database container already exists" in docs/INSTALL.md shows how to find the old')
+        say("  password, or how to keep the files and set a new one. Then run this wizard again.")
+        if saved_url:
+            say("  The address already saved in .env stays as it is.")
+        else:
+            say("  Until then Dewey has no database: it can't index your archive or answer questions.")
+        return {"DATABASE_URL": saved_url}
+
+    made_here = not password
+    if made_here:
+        password = secrets.token_hex(12)  # 24 characters, letters and digits only
+    url = docker_database_url(password)
+    # May this run write POSTGRES_PASSWORD? Only for a password it made, and only if .env has none.
+    may_save = made_here and not cur.get("POSTGRES_PASSWORD", "").strip()
+
+    def values(connected: bool, keep_password: bool) -> dict:
+        out = {"DATABASE_URL": url if connected else saved_url}
+        if keep_password:
+            out["POSTGRES_PASSWORD"] = password
+        return out
+
+    if running:
+        say("  Docker already has a container named dewey-db, and it is running: nothing to start.")
+        _say_saved_password("This wizard uses the database password saved in .env", cur, password, source)
+        _say_address_change(saved_url, url)
+    elif exists:
+        say("  Docker already has a container named dewey-db, but it isn't running (Docker reports it")
+        say(f"  as \"{state}\"). What was indexed in it is still there. Run this in another terminal,")
+        say("  then come back:")
+        say_command(start)
+        _say_saved_password("This wizard uses the database password saved in .env", cur, password, source)
+    else:
+        if not seen:
+            say("  This wizard couldn't see whether dewey-db already exists. If it doesn't, the command")
+            say("  below creates it.")
+        elif look.volume:
+            say("  Docker has no container named dewey-db, but it still has this database's files (the")
+            say("  volume dewey-db-data). The command below makes a new container that uses them, so what")
+            say("  was indexed is still there.")
+        if not made_here:
+            # Only when Docker showed that nothing exists is the command sure to create the
+            # database, and so to give it this password.
+            _say_saved_password("The command below shows the database password saved in .env", cur, password,
+                                source, proof=seen and not look.volume)
+        if seen:
+            say("  Run this in another terminal, then come back:")
+        else:
+            say("  Run this in another terminal (start Docker first if needed), then come back:")
+        say_command(*pgvector_run_command(password))
+        if not seen and made_here:
+            say("  If Docker answers that the name dewey-db is already in use, a database already exists,")
+            say("  and this new password won't fit it. Don't remove anything: answer n below, and see")
+            say('  "The database container already exists" in docs/INSTALL.md.')
+        elif not seen:
+            say("  If Docker answers that the name dewey-db is already in use, the database exists already.")
+            say("  Start it instead:")
+            say_command(start)
+
+    say("  About this database:")
+    if not exists:
+        say("   - Only this computer can reach it: its port is published on 127.0.0.1.")
+        if made_here and not may_save:
+            say("   - The password above was made for you. .env already has a POSTGRES_PASSWORD, which this")
+            say("     wizard can't use here (it isn't only letters and digits) and leaves as it is. So the")
+            say("     new password is saved only inside DATABASE_URL, and only if you answer y below.")
+        elif made_here and seen:
+            say("   - The password above was made for you. This wizard saves it in .env (as POSTGRES_PASSWORD)")
+            say("     and uses it again if you re-run it.")
+        elif made_here:
+            say("   - The password above was made for you. This wizard saves it in .env (as POSTGRES_PASSWORD)")
+            say("     only if you answer y below.")
+        say("   - Its data is kept in a Docker volume named dewey-db-data, which stays if the container")
+        say("     is removed.")
+        say("   - It starts again when Docker starts, unless you stopped it yourself. If it is ever")
+        say("     stopped, start Docker, then run:")
+        say("         " + start)
+    else:
+        if look.uses_volume:
+            say("   - A database made with this wizard's command starts again when Docker starts, unless")
+            say("     you stopped it yourself.")
+        else:
+            say("   - It doesn't use the volume dewey-db-data, so it was made by an earlier version of this")
+            say("     wizard or by hand. It may stay stopped after a restart. This makes it start when")
+            say("     Docker starts:")
+            say(f"         docker update --restart unless-stopped {PGVECTOR_CONTAINER}")
+            say('     "An older dewey-db" in docs/INSTALL.md explains the rest.')
+        if running:
+            say("   - If it is ever stopped, start Docker, then run:")
+            say("         " + start)
+        else:
+            say("   - If it is ever stopped again, start Docker, then use the docker start command above.")
+    say("   - It is separate from the db service in docker-compose.yml: another database with its")
+    say("     own data. An archive indexed in one isn't in the other.")
+
+    if running:
+        return values(True, keep_password=False)
+    # Yes is the suggested answer only when Docker was seen: unseen, an older dewey-db may hold the name.
+    if ask_yes("  Is it running?", default=seen):
+        _say_address_change(saved_url, url)
+        return values(True, keep_password=may_save)
+    # A new password is worth keeping only if the command is sure to create a database with it:
+    # Docker showed that nothing exists. Kept after "Docker didn't answer", it would be taken for
+    # the password of whatever dewey-db the next run finds.
+    keep_password = may_save and seen
+    if saved_url == url:
+        say("  No problem: .env already has this database's address, and it stays as it is.")
+        say("  Start the database whenever you like.")
+    elif keep_password or not made_here:
+        say("  No problem: start it whenever you like, then re-run this wizard and choose docker again.")
+        say("  It then prints the same command, or finds the database if you started it meanwhile.")
+    else:
+        say("  No problem. The password above isn't saved, so don't use that command later: re-run")
+        say("  this wizard when you are ready, and use the command it prints then.")
+    if not saved_url:
+        say("  Until then Dewey has no database: it can't index your archive or answer questions.")
+    elif saved_url != url:
+        say("  The address already saved in .env stays as it is.")
+    return values(False, keep_password=keep_password)
+
+
+def ask_postgres(cur: dict, interactive: bool, dry_run: bool = False) -> dict:
     heading("Postgres with pgvector (where your archive is stored and searched)")
     say("Dewey keeps your archive in a Postgres database with the pgvector extension")
     say("installed. It can run on this machine, or anywhere you can reach from it.")
@@ -486,10 +779,10 @@ def ask_postgres(cur: dict, interactive: bool) -> dict:
     answer = choose("Do you have a Postgres database for Dewey?", options, default, mark="suggested")
 
     if answer == "docker":
-        started = offer_pgvector_container()
-        if started:
-            return started
-        answer = "later"
+        values = offer_pgvector_container(cur, dry_run=dry_run)
+        if values is not None:
+            return values
+        answer = "yes"  # a dewey-db this wizard has no password for: whoever made it may know its address
 
     if answer == "later":
         say()
@@ -1696,7 +1989,7 @@ def main() -> int:
         values.update(ask_retrieval(stack, current))
         if "voyage" in (values["EMBEDDING_PROVIDER"], values["RERANK_PROVIDER"]):
             values.update(ask_voyage(current, interactive))
-        values.update(ask_postgres(current, interactive))
+        values.update(ask_postgres(current, interactive, dry_run=args.dry_run))
     if stack == "azure":
         values.update(ask_azure(current, interactive))
     values.update(ask_newsroom(current))
