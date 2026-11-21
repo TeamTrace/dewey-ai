@@ -329,7 +329,8 @@ The examples name the server `dewey` (any name works). Use your own paths from
 [Before you start: HTTP](#before-you-start-http). The wizard's last screen also prints the paths. It
 names a Python that has Dewey's packages: the one that ran the wizard, or else the one in the Dewey
 folder's `.venv`. If neither has them yet, it says so: install the packages first (the same screen
-lists how), or change `command:` to the Python that has them.
+lists how), or change `command:` to the Python that has them. If it couldn't check, it says so and names
+the Python that ran the wizard.
 
 On Windows, put paths in YAML in single quotes (`'C:\Users\you\dewey-ai\app\mcp_server.py'`): in double
 quotes, `\` starts an escape and breaks the path. Change the wizard's printed Hermes example too. In
@@ -874,7 +875,7 @@ November 2026.
 
 | Symptom | Likely cause and fix |
 |---|---|
-| A stdio client says the server failed to start or disconnected, or `claude mcp list` shows `✘ Failed to connect` | Run the server by hand ([Before you start: stdio](#before-you-start-stdio), step 3) to see its message. A `ModuleNotFoundError` there means `command` names a Python without Dewey's packages: use the `.venv` paths from that section |
+| A stdio client says the server failed to start or disconnected, or `claude mcp list` shows `✘ Failed to connect` | Run the server by hand ([Before you start: stdio](#before-you-start-stdio), step 3) to see its message. A `ModuleNotFoundError` there means `.venv`'s Python doesn't have Dewey's packages: turn the environment on and run `python -m pip install -r requirements.txt` ([INSTALL.md](INSTALL.md#troubleshooting)). If the server starts there but not from your AI tool, check that the tool's `command` and `args` are the two paths from that section |
 | `dewey-mcp: configuration error` names a chat-model setting, though you only search | The server needs those settings to start ([The two tools](#the-two-tools)) |
 | A tool call fails with "a problem on the Dewey server ... reference ..." | Find that reference in the server's log (stderr; `docker compose logs dewey`). On your own computer after a restart, first check that the database is running ([INSTALL.md](INSTALL.md#start-dewey-again-later)). On Claude, also look for `could not confirm a Claude credential` where the server started |
 | `docker compose up` stops with `required variable DEWEY_MCP_TOKEN is missing a value` | Add `DEWEY_MCP_TOKEN` to `.env` ([how](#before-you-start-http)) |

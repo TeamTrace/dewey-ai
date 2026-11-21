@@ -14,7 +14,7 @@ One function, install.modules_missing(), asks a fresh copy of a Python which mod
 find. Most tests replace it with a described answer, so they need no particular packages;
 ProbeTests runs the real one, once against a throwaway virtual environment. No terminal is
 needed: input() is patched. Standard library only; no network.
-tests/install/test_install.py runs three of these cases through a real terminal.
+tests/install/test_install.py runs four of these cases through a real terminal.
 """
 import ast
 import contextlib
@@ -788,6 +788,72 @@ class NextStepsTests(TempRootTestCase):
         self.assertIn("local search models", words(step))
         self.assertIn("requirements-local.txt", words(step))
 
+    def test_the_pip_commands_start_in_the_dewey_folder_when_the_terminal_is_somewhere_else(self):
+        # `-r requirements.txt` and `python install.py` are relative. The other forms of this step
+        # begin with `cd`; this one used to leave it out.
+        self.articles()
+        pip, again = "python -m pip install -r requirements.txt", "python install.py"
+        for where, cd in ((computer("dewey", "linux", in_root=False), "cd /home/you/dewey-ai"),
+                          (computer("other", "mac", in_root=False), "cd /Users/you/dewey-ai"),
+                          (computer("dewey", "windows", in_root=False), "cd C:\\Users\\you\\dewey-ai")):
+            for values, here, expected in ((CLAUDE_VOYAGE, EVERYTHING, [cd, pip]),
+                                           (OPEN_LOCAL, EVERYTHING, [cd, pip, again]),
+                                           (OPEN_LOCAL, LOCAL_MODEL_MODULES, [cd, again])):
+                with self.subTest(where=where, values=values, here=here):
+                    (step, _) = self.steps(values, where=where, here=here)
+                    self.assertEqual(commands(step), expected)
+                    self.assertIn("go to the Dewey folder", words(step))
+                    self.assertFalse(step[0].startswith("  "))
+                    for at, line in enumerate(step):
+                        if line.startswith("  "):   # each command under a line that says what it does
+                            self.assertTrue(step[at - 1].endswith(":") and not step[at - 1].startswith("  "), step)
+        # In the Dewey folder there is nowhere to go: the step is as short as before.
+        (step, _) = self.steps(CLAUDE_VOYAGE, where=computer("dewey"), here=EVERYTHING)
+        self.assertEqual(step, ["Install the packages Dewey needs, with the virtual environment turned on:",
+                                "  " + pip])
+
+    def test_the_wizard_is_run_again_once_and_only_after_its_environment_is_on(self):
+        # Settings and packages both missing, outside the environment the packages belong in:
+        # step 1 used to say `python install.py`, which there is often no command at all (on a
+        # Mac), or is the Python without the packages, and step 2 ended with it again.
+        self.articles()
+        missing = ["DATABASE_URL", "VOYAGE_API_KEY"]
+        for where in (computer("none"), computer("off"), computer("broken"), computer("other+own"),
+                      computer("none", "linux", in_root=False), computer("off", "windows")):
+            for venv in (EVERYTHING, ()):   # the .venv lacks the packages too, or already has them
+                with self.subTest(where=where, venv=venv):
+                    steps = self.steps(CLAUDE_VOYAGE, missing=missing, indexing="no-settings", where=where,
+                                       here=EVERYTHING, venv=venv)
+                    settings, packages = steps[0], steps[1]
+                    self.assertEqual(commands(settings), [])
+                    self.assertIn("DATABASE_URL, VOYAGE_API_KEY", settings[0])
+                    self.assertIn("Edit .env, or type what is missing when you run this wizard again in step 2.",
+                                  settings[0])
+                    printed = [line.strip() for step in steps for line in step]
+                    self.assertEqual(printed.count("python install.py"), 1)
+                    (turn_on,) = [at for at, line in enumerate(printed) if "activate" in line.lower()]
+                    self.assertLess(turn_on, printed.index("python install.py"))
+                    self.assertEqual(packages[-1], "  python install.py")
+                    self.assertEqual("Nothing needs installing" in words(packages),
+                                     venv == () and where.dewey_venv_exists)
+        # With every setting filled in, a .venv that has the packages still only has to be turned on.
+        (step, _) = self.steps(CLAUDE_VOYAGE, where=computer("off"), here=EVERYTHING, venv=())
+        self.assertEqual(commands(step), ["source .venv/bin/activate"])
+        # Inside the environment, `python` is its Python: the settings step keeps its command.
+        for where in (computer("dewey"), computer("other")):
+            with self.subTest(where=where):
+                steps = self.steps(CLAUDE_VOYAGE, missing=missing, indexing="no-settings", where=where, here=EVERYTHING)
+                self.assertEqual(steps[0][-1], "  python install.py")
+                self.assertIn("Edit .env, or run this wizard again:", steps[0][0])
+                self.assertEqual(commands(steps[1]), ["python -m pip install -r requirements.txt"])
+        # And so it does when no package is missing, or the check could not be made.
+        for here in ((), None):
+            with self.subTest(here=here):
+                steps = self.steps(CLAUDE_VOYAGE, missing=missing, indexing="no-settings", where=computer("none"),
+                                   here=here)
+                self.assertEqual(steps[0][-1], "  python install.py")
+                self.assertEqual(len(steps), 2)   # settings, then indexing
+
     def test_outside_one_the_steps_make_or_turn_on_the_environment_and_run_the_wizard_again(self):
         # "Outside one" includes another project's environment that was left turned on, when the
         # Dewey folder has its own: Dewey's packages do not belong in the other project's.
@@ -1098,6 +1164,10 @@ class EndOfWizardTests(TempRootTestCase):
         self.assertEqual(numbered[3][1], "Index your archive:")
         self.assertIn("     python app/setup_postgres.py\nConnect an AI tool", tail)
         self.assertLess(tail.index("python3"), tail.index("python app/import_archive.py --help"))
+        # The wizard is run again once, and only after its environment is on: not in step 1, out here.
+        self.assertEqual(tail.count("python install.py"), 1)
+        self.assertLess(tail.index("source .venv/bin/activate"), tail.index("python install.py"))
+        self.assertIn("type what is missing when you run this wizard again in step 2.", numbered[0][1])
         # ...and the example names the Python those steps will put the packages in.
         self.assertIn(f'command: "{install.venv_python()}"', tail)
         self.assertIn("change command: and the HTTP command", flat(tail))
@@ -1220,8 +1290,15 @@ class WrittenDownTests(TempRootTestCase):
         self.assertIn("names a Python that has Dewey's packages", recipes)
         self.assertIn("change `command:` to the Python that has them", recipes)
         self.assertNotIn("correctly if you ran it with the virtual environment on", recipes)
-        self.assertRegex(self.section(guide, "## Troubleshooting"),
-                         r"`ModuleNotFoundError` there means `command` names")
+        # The step it points to runs .venv's own Python, so that is the Python the error is about.
+        troubleshooting = self.section(guide, "## Troubleshooting")
+        self.assertIn("`ModuleNotFoundError` there means `.venv`'s Python doesn't have Dewey's packages: turn the "
+                      "environment on and run `python -m pip install -r requirements.txt`", troubleshooting)
+        self.assertNotIn("means `command` names a Python without", troubleshooting)
+        (by_hand,) = re.findall(r"\n3\. \*\*Start the server once by hand\.\*\*[\s\S]*?```bash\n(.*)\n",
+                                self.section(guide, "### Before you start: stdio"))
+        self.assertEqual(by_hand.strip(), '"$PWD/.venv/bin/python" "$PWD/app/mcp_server.py"')
+        self.assertIn("If it couldn't check, it says so and names the Python that ran the wizard", recipes)
 
     def test_the_readme_says_why_the_answer_is_no_and_where_the_command_is(self):
         (paragraph,) = [line for line in self.read("README.md").splitlines()

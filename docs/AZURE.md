@@ -136,7 +136,7 @@ The setup wizard writes Dewey's settings to a [`.env` file](GLOSSARY.md#env-file
      Wrote /Users/you/dewey-ai/.env
    ```
 
-5. **Let the wizard finish.** It leaves checking Azure to `app/setup.py`, which only checks that the settings are filled in. If `data/` holds article files, it asks `Index them now? (y/N):`. Type `y` only once [What you need in Azure](#what-you-need-in-azure) is done; otherwise press Enter and [build the index](#build-the-search-index) later.
+5. **Let the wizard finish.** It leaves checking Azure to `app/setup.py`, which only checks that the settings are filled in. If `data/` holds article files, it asks `Index them now? (y/N):` (if the wizard's Python lacks Dewey's packages, it says so instead and lists the command under Next steps). Type `y` only once [What you need in Azure](#what-you-need-in-azure) is done; otherwise press Enter and [build the index](#build-the-search-index) later.
 
 ### By hand
 

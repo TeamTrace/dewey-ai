@@ -2558,35 +2558,40 @@ def installs_here(where: PythonSituation) -> bool:
     return bool(where.venv) and not where.dewey_venv_is_off
 
 
-def package_step(values: dict, lacking: List[str], where: PythonSituation) -> List[str]:
+def package_step(values: dict, lacking: List[str], where: PythonSituation, wizard_again: bool = False) -> List[str]:
     """The "get the packages" step of "Next steps", for a Python that lacks the requirements
     files in `lacking`. The lines that start with two spaces are its commands.
 
     Inside a virtual environment: pip, with that environment on (for the local search models,
     the wizard again, because it asks which PyTorch fits). Otherwise (see installs_here()): the
     shared lines that make or turn on the Dewey folder's environment and run the wizard there.
-    And when that environment already has everything, turning it on is all there is to do.
+    And when that environment already has everything, turning it on is all there is to do,
+    unless `wizard_again` says the wizard has to run there anyway, for settings still missing.
+    Whichever it is, the commands are relative to the Dewey folder, so `cd` comes first when
+    the terminal is somewhere else.
     """
     if dewey_venv_has_packages(values, where):
         return (["Nothing needs installing: the Python running this wizard lacks packages Dewey needs, but the",
                  "virtual environment in the Dewey folder has them. Use it for the commands below."]
-                + environment_steps(where, rerun=False))
+                + environment_steps(where, rerun=wizard_again))
     if not installs_here(where):
         return (["Install the packages Dewey needs in a virtual environment: run this wizard again in one, press",
                  "Enter to keep each answer, and let it install them."]
                 + environment_steps(where))
     lines: List[str] = []
     local = f"the packages for local search models, PyTorch and {REQUIREMENTS_LOCAL}"
+    go = [] if where.in_root else ["First, go to the Dewey folder:", "  cd " + _typed(where.system, where.root)]
     if REQUIREMENTS in lacking:
-        lines += ["Install the packages Dewey needs, with the virtual environment turned on:",
-                  f"  python -m pip install -r {REQUIREMENTS}"]
+        turned_on = "Install the packages Dewey needs, with the virtual environment turned on"
+        lines += ([turned_on + "."] + go + ["Then install them:"]) if go else [turned_on + ":"]
+        lines.append(f"  python -m pip install -r {REQUIREMENTS}")
     if REQUIREMENTS_LOCAL in lacking:
         if lines:
             lines += [f"Then run this wizard again and let it install {local}.",
                       "It asks which PyTorch fits this computer:"]
         else:
-            lines += [f"Install {local}, by running this wizard again.",
-                      "It asks which PyTorch fits this computer:"]
+            lines += ([f"Install {local}, by running this wizard again."] + go
+                      + ["It asks which PyTorch fits this computer:"])
         lines.append("  python install.py")
     return lines
 
@@ -2603,12 +2608,17 @@ def remaining_steps(values: dict, missing: List[str], indexing: str,
     """
     where = where or python_situation()
     steps: List[List[str]] = []
+    lacking = missing_packages(values)  # None when the check could not be made: the MCP example below says so
+    # When the package step makes or turns on the Dewey folder's environment, the wizard is not
+    # run again before it: out here `python` is often no command at all (on a Mac), or is the
+    # Python that lacks the packages. It runs once, in that step, and takes the settings there.
+    in_package_step = bool(lacking) and not installs_here(where)
     if missing:
-        steps.append([f"Fill in what is still missing: {', '.join(missing)}. Edit .env, or run this wizard again:",
-                      "  python install.py"])
-    lacking = missing_packages(values)
-    if lacking:  # not when the check could not be made: the MCP example below says so instead
-        steps.append(package_step(values, lacking, where))
+        fill = f"Fill in what is still missing: {', '.join(missing)}. Edit .env, or "
+        steps.append([fill + "type what is missing when you run this wizard again in step 2."] if in_package_step
+                     else [fill + "run this wizard again:", "  python install.py"])
+    if lacking:
+        steps.append(package_step(values, lacking, where, wizard_again=bool(missing)))
     if not any((ROOT / "data").glob("*.json")):
         steps.append(["Get your articles into the data folder. docs/IMPORTING.md explains how. To list the importers:",
                       f"  python {IMPORT_SCRIPT} --help"])
