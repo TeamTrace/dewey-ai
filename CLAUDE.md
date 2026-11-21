@@ -32,6 +32,18 @@ demo. Docs are for newsrooms of any technical level: plain, and honest about lim
 - `install.py` (repo root): interactive setup wizard that writes `.env`. Standard library only, because it runs before dependencies are installed. Its `SECTIONS` list must stay in sync with the settings read in `app/providers/__init__.py` and `app/models/core.py`. On the Postgres stacks its "Get your archive into Dewey" step runs an importer as a subprocess (`sys.executable app/import_archive.py ...`), a `--limit 20` trial first; `--dry-run` only prints the commands.
 - Deployment: `Dockerfile` (python:3.12-slim, non-root uid 1000, `INSTALL_LOCAL_MODELS` build arg; default command is the MCP server on `0.0.0.0:8765`, TCP healthcheck), `docker-compose.yml` (`dewey` = MCP server, published on `127.0.0.1:8765` only, `DEWEY_MCP_TOKEN` required via `${...:?}`, alias `dewey-mcp` on the fixed-name `dewey-mcp-clients` network for chat-UI containers; `db` = `pgvector/pgvector:pg18`, never published and not on that network; `demo` profile = Gradio page on `127.0.0.1:7860`; `ollama` profile; the indexer is `docker compose run --rm -v ./data:/app/data:ro dewey python app/setup_postgres.py`), `deploy/fly.toml.example` and `deploy/render.yaml.example` (MCP server + database only; TCP health checks because `/mcp` answers 401 without the token), guides in `docs/DEPLOYMENT.md` and `docs/MCP.md`. Platform and client claims in those guides link to the source they were checked against (GitHub-hosted docs or source), or are marked unverified. Tests: `tests/deploy/` (runs `docker compose config` when the docker CLI is installed; no daemon needed).
 
+## Writing issues, PRs and notes
+
+- Tight, AP style: short sentences, facts first, no filler or praise. Cite the source of each claim (a link, a file and line, or a command you ran) and mark anything you couldn't check as unverified.
+- Every issue opens with a short summary block, then `---`, then the detail:
+
+  ```
+  **Summary:** what's wrong and why it matters, in two sentences at most.
+  **Recommendation:** what to do, in one sentence.
+  **Gotchas:** traps for whoever picks it up, in two short items at most.
+  ```
+- To hand an issue to Claude, add the `claude` label (`.github/workflows/claude.yml`); Claude isn't a GitHub user, so it can't be assigned.
+
 ## Conventions
 
 - Scripts run from the repo root with `app/` as the import root (`python app/main.py`); imports are top-level (`from models import ...`), not `app.models`.
