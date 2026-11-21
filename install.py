@@ -634,6 +634,67 @@ def http_get_json(url: str, headers=None, timeout: float = 5.0):
         return json.loads(resp.read().decode("utf-8"))
 
 
+# pgvector 0.8.0 added iterative index scans; without them, date and byline searches can miss
+# stories. MIN_PGVECTOR, pgvector_version() and pgvector_version_text() repeat the ones in
+# app/providers/pgvector_store.py, which this installer can't import before the dependencies are
+# installed. A test in tests/providers/test_pgvector_store.py keeps the two in step.
+MIN_PGVECTOR = (0, 8)
+PGVECTOR_UPDATE_SQL = "ALTER EXTENSION vector UPDATE;"
+# The numbers a version starts with: "0.6.0" in "0.6.0", "0.8" in "0.8beta". Only the digits 0-9,
+# at most nine to a number, so that nothing else of a version is ever printed.
+_PGVECTOR_NUMBERS = re.compile(r"\s*(([0-9]{1,9})(?:\.([0-9]{1,9}))?(?:\.[0-9]{1,9}){0,2})")
+
+
+def pgvector_version(text) -> Optional[tuple]:
+    """(major, minor) of a pgvector version such as "0.8.7" or "0.8", to compare as numbers
+    (0.10 is newer than 0.8). None when `text` isn't text that starts with a number."""
+    match = _PGVECTOR_NUMBERS.match(text) if isinstance(text, str) else None
+    return (int(match.group(2)), int(match.group(3) or 0)) if match else None
+
+
+def pgvector_version_text(text) -> Optional[str]:
+    """The part of a version that the wizard prints: the numbers it starts with ("0.6.0"), never
+    anything else the database reports. None when pgvector_version() is."""
+    match = _PGVECTOR_NUMBERS.match(text) if isinstance(text, str) else None
+    return match.group(1) if match else None
+
+
+def pgvector_status(default_version, installed_version) -> str:
+    """The Postgres result of the service check, for a server that has pgvector.
+
+    Judges the version Dewey will get: the one in the database the URL names (installed_version,
+    which is the extversion Dewey reads at every search) or, where CREATE EXTENSION hasn't run
+    yet, the one the server would give it (default_version). Older than 0.8, or unreadable, is
+    flagged with what to do about it: a result to read, never a reason to stop the wizard.
+    Lines after the first are indented to sit under it in the list of results.
+    """
+    in_database = installed_version is not None
+    judged = installed_version if in_database else default_version
+    version, shown = pgvector_version(judged), pgvector_version_text(judged)
+    if version is not None and version >= MIN_PGVECTOR:
+        return f"ok, pgvector {shown} available"
+    if version is None:
+        found = "pgvector's version can't be read, so Dewey treats it as older than 0.8"
+    else:
+        found = f"pgvector {shown} is older than 0.8"
+    lines = [f"connected, but {found}: date and byline searches can miss stories"]
+    on_server = pgvector_version(default_version)
+    if not in_database:
+        lines += ["pgvector isn't turned on in this database yet; that is the version the server would give it.",
+                  "Install pgvector 0.8 or newer on the database server before you index."]
+    elif on_server is not None and on_server >= MIN_PGVECTOR:
+        lines += [f"The database server already has pgvector {pgvector_version_text(default_version)}, "
+                  "but this database hasn't been",
+                  "updated to it. To fix it, run this in Dewey's database as a Postgres superuser:",
+                  f"    {PGVECTOR_UPDATE_SQL}"]
+    else:
+        lines += ["To fix it, install pgvector 0.8 or newer on the database server, then run this in",
+                  "Dewey's database as a Postgres superuser:",
+                  f"    {PGVECTOR_UPDATE_SQL}"]
+    lines.append("Step by step: 'Upgrade pgvector' in docs/STACKS.md.")
+    return "\n      ".join(lines)
+
+
 def check_services(values: dict) -> None:
     heading("Check credentials and services")
     stack = values["DEWEY_STACK"]
@@ -666,9 +727,9 @@ def check_services(values: dict) -> None:
         try:
             import psycopg
             with psycopg.connect(values["DATABASE_URL"], connect_timeout=5) as conn:
-                row = conn.execute(
-                    "SELECT default_version FROM pg_available_extensions WHERE name = 'vector'").fetchone()
-            results.append(("Postgres", f"ok, pgvector {row[0]} available" if row else
+                row = conn.execute("SELECT default_version, installed_version FROM pg_available_extensions "
+                                   "WHERE name = 'vector'").fetchone()
+            results.append(("Postgres", pgvector_status(row[0], row[1]) if row else
                             "connected, but the pgvector extension is NOT installed on this server"))
         except ImportError:
             results.append(("Postgres", "skipped (install requirements first)"))
