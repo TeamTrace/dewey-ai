@@ -728,7 +728,7 @@ The setup wizard writes your settings to a [.env file](GLOSSARY.md#env-file) in 
 
 3. **Answer each question and press Enter** ([What the wizard asks](#what-the-wizard-asks)).
 
-`python install.py --dry-run` asks the same questions but only prints the result, with secrets masked: a [dry run](GLOSSARY.md#dry-run). It writes no `.env` and imports nothing, though a chat-model download you accept still happens. `--no-browser` suits a server without a desktop; it also skips the offer to download the chat model.
+`python install.py --dry-run` asks the same questions but only prints the result, with secrets masked: a [dry run](GLOSSARY.md#dry-run). One step differs: if you choose `docker` for the database, a dry run only shows the command, with `PASSWORD` in place of a password, and asks nothing more there. It writes no `.env` and imports nothing, though a chat-model download you accept still happens. `--no-browser` suits a server without a desktop; it also skips the offer to download the chat model.
 
 On Windows, the wizard prints a few macOS and Linux commands; the screens below give the ones to use ([a known problem](https://github.com/TeamTrace/dewey-ai/issues/25)).
 
