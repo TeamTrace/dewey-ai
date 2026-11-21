@@ -416,6 +416,25 @@ class WizardImportTests(unittest.TestCase):
                 return line.split("=", 1)[1].strip("'")
         return None
 
+    def test_skip_and_existing_json(self):
+        out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertIn("python app/import_archive.py --help", out)
+        token = self.env_token()
+        self.assertIsNotNone(token)
+        self.assertGreaterEqual(len(token), 32)
+        self.assertNotIn(token, out)
+        self.assertIn("mcp_servers:", out)
+        (self.root / "data" / "mine.json").write_text("[]")
+        # The re-run finds the saved token and offers to keep it (default yes).
+        rerun = self.OPEN_STACK + [("Keep the existing MCP token", "")] + self.WRITE_ENV
+        out, status = self.wizard(rerun + [(self.WHERE, "")])  # default: json
+        self.assertEqual(status, 0, out)
+        self.assertIn("Using the 1 JSON file(s) already in data/.", out)
+        self.assertEqual(self.env_token(), token)
+        self.assertNotIn(token, out)
+
+
     # --- the Postgres question (issue #5: none of its three answers but "later" had ever run in a test)
 
     POSTGRES = r"Do you have a Postgres database[\s\S]*?Choose a number or name"
@@ -499,24 +518,6 @@ class WizardImportTests(unittest.TestCase):
         self.assertNotIn("s3cretPW9", out)
         self.assertIn("DATABASE_URL='********'", out.split("Summary", 1)[1])
         self.assertNotIn("Still missing", out)
-
-    def test_skip_and_existing_json(self):
-        out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
-        self.assertEqual(status, 0, out)
-        self.assertIn("python app/import_archive.py --help", out)
-        token = self.env_token()
-        self.assertIsNotNone(token)
-        self.assertGreaterEqual(len(token), 32)
-        self.assertNotIn(token, out)
-        self.assertIn("mcp_servers:", out)
-        (self.root / "data" / "mine.json").write_text("[]")
-        # The re-run finds the saved token and offers to keep it (default yes).
-        rerun = self.OPEN_STACK + [("Keep the existing MCP token", "")] + self.WRITE_ENV
-        out, status = self.wizard(rerun + [(self.WHERE, "")])  # default: json
-        self.assertEqual(status, 0, out)
-        self.assertIn("Using the 1 JSON file(s) already in data/.", out)
-        self.assertEqual(self.env_token(), token)
-        self.assertNotIn(token, out)
 
 
 if __name__ == "__main__":
