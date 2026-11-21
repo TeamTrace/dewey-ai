@@ -1,5 +1,8 @@
-# Lets maintainers @claude-mention Claude Code on issues and pull requests.
-# Based on anthropics/claude-code-action's examples/claude.yml.
+# Lets maintainers hand work to Claude Code on issues and pull requests:
+# - add the `claude` label to an issue to start a run on it, or
+# - mention @claude in a comment, review, or a new issue's title or body.
+# Based on anthropics/claude-code-action's examples/claude.yml; the label
+# trigger is the action's `label_trigger` input (docs/usage.md in that repo).
 #
 # Setup: add an ANTHROPIC_API_KEY repository secret (Settings > Secrets and
 # variables > Actions) and install the Claude GitHub App on this repository
@@ -7,7 +10,10 @@
 #
 # This repository is public, so the `if:` below also requires the commenter
 # to be an OWNER, MEMBER or COLLABORATOR: anyone else's @claude mention is
-# ignored and cannot spend the API key.
+# ignored and cannot spend the API key. The label needs no such check:
+# only people with triage access or more can label issues.
+#
+# Claude is not a GitHub user, so issues can't be assigned to it; use the label.
 name: Claude Code
 
 on:
@@ -16,7 +22,7 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened, labeled]
   pull_request_review:
     types: [submitted]
 
@@ -30,8 +36,10 @@ jobs:
           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
         (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') &&
           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
-          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+        (github.event_name == 'issues' && github.event.action == 'opened' &&
+          (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+        (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude')
       )
     runs-on: ubuntu-latest
     permissions:
@@ -51,3 +59,4 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          label_trigger: claude
