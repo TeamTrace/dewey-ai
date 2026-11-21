@@ -406,6 +406,20 @@ class PgvectorVersionWarningTests(unittest.TestCase):
         self.assertLess(pgvector_store.pgvector_version("0.7.4"), pgvector_store.MIN_PGVECTOR)
         pgvector_store.pgvector_version("9" * 5000)  # int() refuses more than 4,300 digits: this must not raise
 
+    def test_the_guides_quote_the_warning_as_it_is_printed(self):
+        # A reader finds the right troubleshooting row by searching for the words on their screen,
+        # and the warning sends them to a section by its title.
+        warning = pgvector_store.old_pgvector_warning("0.6.0")
+        quoted, version, _ = warning.splitlines()[0].partition(" 0.6.0")
+        self.assertEqual(version, " 0.6.0")
+        for guide in ("STACKS.md", "INSTALL.md", "DEPLOYMENT.md", "MCP.md"):
+            text = (REPO / "docs" / guide).read_text(encoding="utf-8")
+            self.assertTrue(f"`{quoted}" in text, f"docs/{guide} no longer quotes {quoted!r}")
+        self.assertIn("'Upgrade pgvector' in docs/STACKS.md", warning)
+        stacks = (REPO / "docs" / "STACKS.md").read_text(encoding="utf-8").splitlines()
+        self.assertIn("Upgrade pgvector", [line.lstrip("#").strip() for line in stacks if line.startswith("#")],
+                      "docs/STACKS.md has no section with that title, which the warning names")
+
     def test_the_wizard_reads_versions_the_same_way(self):
         # install.py is standard library only and runs before the packages this module needs are
         # installed, so it carries its own copy of the rule. This keeps the two from drifting apart.

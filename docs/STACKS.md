@@ -546,7 +546,7 @@ On a PC, an NVIDIA card needs about 7.1 GiB for qwen3:8b with a 16k context. A 1
 
 The four Postgres setups find their database through `DATABASE_URL`, written like `postgresql://USER:PASSWORD@HOST:5432/DATABASE`. Percent-encode `%`, `@`, `:`, `/`, `#`, `?` or spaces in the password, such as `%40` for `@`.
 
-Use pgvector 0.8 or newer: with older versions, very selective date or author filters can return fewer articles. Dewey runs `CREATE EXTENSION IF NOT EXISTS vector` itself when it indexes. It was tested with PostgreSQL 18.7 and pgvector 0.8.7, from the wizard's Docker image.
+Use pgvector 0.8 or newer: with older versions, very selective date or author filters can return fewer articles. Dewey tells you when it finds an older one, in the setup wizard's check and in a warning at its first search ([Upgrade pgvector](#upgrade-pgvector)). Dewey runs `CREATE EXTENSION IF NOT EXISTS vector` itself when it indexes. It was tested with PostgreSQL 18.7 and pgvector 0.8.7, from the wizard's Docker image.
 
 | Option | What you do | Notes |
 |---|---|---|
@@ -674,6 +674,73 @@ Checked November 2026:
 - Hosted plans: [Neon plans](https://github.com/neondatabase/website/blob/main/content/docs/introduction/plans.md) and [Neon extensions](https://github.com/neondatabase/website/blob/main/content/docs/extensions/pg-extensions.md); Supabase's [billing](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/platform/billing-on-supabase.mdx), [database size](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/platform/database-size.mdx), [pausing](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/platform/free-project-pausing.mdx) and [pgvector](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/database/extensions/pgvector.mdx).
 - The 55 MB: 1,024-dimension vectors at pgvector's stated "4 * dimensions + 8 bytes", stored twice (table and index), plus the text. Indexes, row overhead and compression are left out.
 - Docker Desktop: [on a Mac](https://github.com/docker/docs/blob/main/content/manuals/desktop/setup/install/mac-install.md), [on Windows](https://github.com/docker/docs/blob/main/content/manuals/desktop/setup/install/windows-install.md) and [on Linux](https://github.com/docker/docs/blob/main/content/manuals/desktop/setup/install/linux/_index.md). Its paid plans cost $9 (Pro), $15 (Team) or $24 (Business) per user per month, billed annually. A free alternative on a Mac: [Colima](https://github.com/abiosoft/colima). Debian's `docker.io` version: Debian's package archive.
+
+</details>
+
+#### Upgrade pgvector
+
+On pgvector older than 0.8, a search with a date or byline filter can miss stories that match by meaning, without any error. Stories that match by their words still come back, so nothing looks wrong. When Postgres answers from pgvector's index, the filter is applied only after pgvector has picked its nearest candidates, 40 by default, so a filter that few stories pass can leave very little ([pgvector: filtering](https://github.com/pgvector/pgvector/blob/master/README.md#filtering)). From 0.8.0 on it can keep looking until it has enough ([iterative index scans](https://github.com/pgvector/pgvector/blob/master/README.md#iterative-index-scans)), and Dewey switches that on at every search. Dewey tells you about an older version in two places:
+
+- **The setup wizard's check** prints a result that starts `Postgres: connected, but pgvector 0.6.0 is older than 0.8` (with your version), followed by what to do.
+- **The indexer, the MCP server and the demo page** print a warning that starts `Dewey: warning: the pgvector extension in this database is version 0.6.0`. Each prints it once per run, at its first search (the indexer: when indexing starts), not when it starts up. The warning goes to Dewey's error output, never to the chat: look in the terminal that runs Dewey or, when an AI tool starts Dewey itself, in that tool's log ([MCP.md](MCP.md#security)).
+
+*Not tested by us:* we haven't run Dewey, or the steps below, on a pgvector older than 0.8. That Dewey still runs on pgvector 0.5 to 0.7 follows from pgvector's changelog and Dewey's code. The two steps are pgvector's own ([Upgrading](https://github.com/pgvector/pgvector/blob/master/README.md#upgrading)); pgvector lists nothing else to do afterwards, such as indexing again.
+
+**First, back up the database.** Step 1 can replace Postgres's own packages too, and Postgres may restart while that happens: searches fail until it is back. On Linux, with a database called `dewey`, this writes the backup to your home folder:
+
+```bash
+sudo -u postgres pg_dump -Fc dewey > ~/dewey.dump
+```
+
+1. **Install pgvector 0.8 or newer on the database server,** the same way pgvector was installed the first time. Skip this step if the wizard's check says the database server already has it.
+
+   *Not tested by us.* On Ubuntu 24.04 with Ubuntu's own PostgreSQL 16, that way gives 0.6.0 again. PostgreSQL's own apt repository has `postgresql-16-pgvector` 0.8.7 ([its package list](https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/)). Installing it from there also replaces Ubuntu's PostgreSQL 16 with that repository's newer build of PostgreSQL 16. Run these one at a time, and press Enter when the second says "Press Enter to continue":
+
+   ```bash
+   sudo apt install -y postgresql-common
+   ```
+
+   ```bash
+   sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+   ```
+
+   ```bash
+   sudo apt install postgresql-16-pgvector
+   ```
+
+   On a hosted database, the provider installs pgvector: see its documentation (not checked by us for any provider).
+
+2. **Update pgvector in Dewey's database.** This needs Postgres's own superuser, so Dewey can't do it for you. On Linux, with a database called `dewey`:
+
+   ```bash
+   sudo -u postgres psql -d dewey -c 'ALTER EXTENSION vector UPDATE'
+   ```
+
+   On a hosted database, run `ALTER EXTENSION vector UPDATE;` in the provider's SQL editor. Whether your provider allows that wasn't checked by us.
+
+**Then check the version** with the query Dewey itself runs at every search. It should show 0.8 or newer:
+
+```sql
+SELECT extversion FROM pg_extension WHERE extname = 'vector';
+```
+
+On Linux, from a terminal:
+
+```bash
+sudo -u postgres psql -d dewey -c "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+```
+
+A running MCP server or demo page needs no restart: its next search reads the new version. The setup wizard's check then says something like `Postgres: ok, pgvector 0.8.7 available`.
+
+<details>
+<summary>Sources</summary>
+
+Checked November 2026:
+
+- pgvector's [Upgrading](https://github.com/pgvector/pgvector/blob/master/README.md#upgrading) section and its [changelog](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md): iterative index scans arrived in 0.8.0, and the HNSW index type, which Dewey's index uses, in 0.5.0. The changelog's last upgrade note is for 0.6.0.
+- Only a superuser can update an extension unless its control file says otherwise ([PostgreSQL: extensions](https://www.postgresql.org/docs/current/extend-extensions.html)), and [pgvector's control file](https://github.com/pgvector/pgvector/blob/master/vector.control) doesn't.
+- Ubuntu 24.04's own [pgvector is 0.6.0](https://packages.ubuntu.com/noble/postgresql-16-pgvector) and its [PostgreSQL 16 is 16.15](https://launchpad.net/ubuntu/noble/+source/postgresql-16). In PostgreSQL's apt repository, `postgresql-16-pgvector` 0.8.7 for Ubuntu 24.04 (the files with `pgdg24.04` in their names) depends on a newer `postgresql-16` than Ubuntu's 16.15; that repository's own 16.16 meets it. This comes from the repository's package index, read on 21 November 2026.
+- What Dewey prints, and when: `app/providers/pgvector_store.py` (the warning) and `install.py` (the wizard's check). Both go by the version in your database: `extversion`, which the wizard reads as `installed_version`. Before pgvector is turned on in that database, the wizard goes by the version the server would give it, `default_version` ([PostgreSQL: pg_available_extensions](https://www.postgresql.org/docs/current/view-pg-available-extensions.html)).
 
 </details>
 

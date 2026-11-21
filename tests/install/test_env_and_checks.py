@@ -290,6 +290,20 @@ class PostgresCheckTests(unittest.TestCase):
         self.assertEqual(self.check(self.database(installed="0.8.7\x1b[31mRED", default="0.8.7")),
                          "  Postgres: ok, pgvector 0.8.7 available\n")
 
+    def test_the_guides_quote_the_result_as_it_is_printed(self):
+        # A reader finds the right troubleshooting row by searching for the words on their screen,
+        # and the result sends them to a section by its title.
+        shown = self.check(self.database(installed="0.6.0", default="0.6.0"))
+        quoted = shown.splitlines()[0].strip().rsplit(": ", 1)[0]
+        self.assertEqual(quoted, "Postgres: connected, but pgvector 0.6.0 is older than 0.8")
+        for guide in ("INSTALL.md", "STACKS.md"):
+            text = (REPO / "docs" / guide).read_text(encoding="utf-8")
+            self.assertTrue(f"`{quoted}`" in text, f"docs/{guide} no longer quotes {quoted!r}")
+        self.assertIn(self.DOCS, shown)
+        stacks = (REPO / "docs" / "STACKS.md").read_text(encoding="utf-8").splitlines()
+        self.assertIn("Upgrade pgvector", [line.lstrip("#").strip() for line in stacks if line.startswith("#")],
+                      "docs/STACKS.md has no section with that title, which the result names")
+
     def test_other_results_read_as_before(self):
         self.assertEqual(self.check(FakePostgres(versions=None)),
                          "  Postgres: connected, but the pgvector extension is NOT installed on this server\n")

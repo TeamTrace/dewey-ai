@@ -672,7 +672,7 @@ A program that offers tools to AI tools over MCP and does the work, such as a se
 
 An extension that adds [vector](#vector) search to Postgres ([pgvector/pgvector](https://github.com/pgvector/pgvector)).
 
-**In Dewey:** every setup except Azure needs 0.8 or newer. Older versions can return fewer articles when you filter by date or byline.
+**In Dewey:** every setup except Azure needs 0.8 or newer. Older versions can return fewer articles when you filter by date or byline; Dewey warns when it finds one ([how to upgrade](STACKS.md#upgrade-pgvector)).
 
 **More:** [STACKS.md: Postgres with pgvector](STACKS.md#postgres-with-pgvector)
 

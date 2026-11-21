@@ -153,6 +153,7 @@ Check the plan's limit before you index a large archive.
 
 **Check the pgvector version.**
 Before 0.8, narrow date and byline searches return fewer articles, without any error; Ubuntu 24.04's own package is 0.6.0.
+Dewey warns about an older version in its log, once per run at its first search (the indexer: when indexing starts), and the setup wizard's check flags it; [STACKS.md](STACKS.md#upgrade-pgvector) has the upgrade steps.
 Supabase builds pgvector up to 0.8.2, but a project may run another version ([Supabase's build list](https://github.com/supabase/postgres/blob/develop/nix/ext/versions.json)).
 Run this in the provider's SQL editor, not in a terminal:
 
@@ -862,4 +863,5 @@ For `401`, `421 Invalid Host header` or a chat app in Docker that can't connect,
 | Render deploy never becomes healthy | `--port` in `dockerCommand` doesn't match Render's `PORT` |
 | Fly health checks fail | `internal_port` and the check's `port` must both be 8765, the image's port |
 | Clients lose their connection after a quiet period | The platform stopped the idle server (Fly auto-stop, Render free tier): reconnect, or keep it running |
+| `Dewey: warning: the pgvector extension in this database is version` ... `older than 0.8`, in the server's log | Date and byline searches can miss stories until pgvector is upgraded ([steps](STACKS.md#upgrade-pgvector)) |
 | Narrow date or byline searches return too few articles, or indexing fails with prepared-statement errors | Use the direct connection string, not the pooled one, and check that pgvector is 0.8 or newer ([how](#managed-postgres-with-pgvector)) |

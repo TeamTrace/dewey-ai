@@ -886,6 +886,7 @@ November 2026.
 | Claude Desktop doesn't list `dewey` | Read its log ([Claude Desktop](#claude-desktop), step 6). Check the file for missing commas, curly quotes and (Windows) single backslashes, then quit the app completely and reopen it |
 | `ask_archive` times out | A slow model: raise the client's tool timeout, or use `search_archive` |
 | A byline filter finds nothing | Use the whole byline as your archive prints it ([rules](#the-two-tools)) |
+| A date or byline search returns fewer stories than you expect | Look in the server's log for `Dewey: warning: the pgvector extension in this database is version`: pgvector older than 0.8 can miss stories ([STACKS.md](STACKS.md#upgrade-pgvector)). Through a connection pooler, see [DEPLOYMENT.md](DEPLOYMENT.md#managed-postgres-with-pgvector) |
 | The first call with local search models is very slow or times out | The models load, and the reranker downloads, the first time ([STACKS.md](STACKS.md#local-search-models)). Run one search before you connect clients |
 
 ## For developers
