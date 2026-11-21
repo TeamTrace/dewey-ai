@@ -44,7 +44,13 @@ class FakeWordPress:
     def __init__(self, pretty=True, total_headers=True, ignore_page=False, ignore_status=False,
                  max_per_page=100, coauthors_plugin=True, coauthors_status=200, embed=True,
                  html_everywhere=False, index_overrides=None, hidden_users=(7,), hidden_after_count=(),
-                 found_rows=True):
+                 found_rows=True, yoast_authors=None, stale_yoast_lists=False, single_posts=True):
+        # yoast_authors: {post id: name}, served as yoast_head_json.author the way Yoast SEO does.
+        # stale_yoast_lists=True: in a list response every post carries the first post's name, as
+        # seen on a live site; only /wp/v2/posts/<id> gives each post its own.
+        # single_posts=False: the site answers 404 for /wp/v2/posts/<id>.
+        self.yoast_authors, self.stale_yoast_lists = dict(yoast_authors or {}), stale_yoast_lists
+        self.single_posts = single_posts
         # hidden_after_count: post ids a plugin drops from a page after WordPress has counted them
         # (e.g. a membership plugin's the_posts filter), so X-WP-Total includes them.
         # found_rows=False: a plugin forced no_found_rows, so WordPress reports 0 posts / 0 pages
@@ -179,6 +185,9 @@ class FakeWordPress:
         m = re.fullmatch(r"/wp/v2/([a-z_-]+)", route)
         if m and m.group(1) in TYPE_BY_REST_BASE:
             return self.collection(req, TYPE_BY_REST_BASE[m.group(1)], route, query, authed)
+        m = re.fullmatch(r"/wp/v2/([a-z_-]+)/(\d+)", route)
+        if m and m.group(1) in TYPE_BY_REST_BASE and self.single_posts:
+            return self.single(req, TYPE_BY_REST_BASE[m.group(1)], int(m.group(2)), query, authed)
         return self._error(req, 404, "rest_no_route", "No route was found matching the URL and request method.")
 
     def collection(self, req, post_type, route, query, authed):
@@ -217,7 +226,21 @@ class FakeWordPress:
             headers += [("X-WP-Total", str(total)), ("X-WP-TotalPages", str(max_pages))]
             if page < max_pages:
                 headers.append(("Link", f'<{self._api_url(route)}&page={page + 1}>; rel="next"'))
-        self._send(req, 200, [self._shape(p, query) for p in chunk], headers=headers)
+        shaped = [self._shape(p, query) for p in chunk]
+        if self.stale_yoast_lists and chunk:
+            first = self.yoast_authors.get(chunk[0]["id"])
+            for post in shaped:
+                if "yoast_head_json" in post:
+                    post["yoast_head_json"] = {"author": first}
+        self._send(req, 200, shaped, headers=headers)
+
+    def single(self, req, post_type, post_id, query, authed):
+        post = next((p for p in self.posts if p["id"] == post_id and p["type"] == post_type), None)
+        if post is None:
+            return self._error(req, 404, "rest_post_invalid_id", "Invalid post ID.")
+        if post["status"] != "publish" and not authed:
+            return self._error(req, 401, "rest_forbidden", "Sorry, you are not allowed to view this post.")
+        self._send(req, 200, self._shape(post, query))
 
     def _shape(self, stored, query):
         post = copy.deepcopy(stored)
@@ -225,6 +248,8 @@ class FakeWordPress:
             post.pop("coauthors", None)
         author = post.get("author")
         post["_links"] = {"self": [{"href": self._api_url(f"/wp/v2/posts/{post['id']}")}]}
+        if post["id"] in self.yoast_authors:
+            post["yoast_head_json"] = {"author": self.yoast_authors[post["id"]]}
         if author:
             post["_links"]["author"] = [{"embeddable": True, "href": self._api_url(f"/wp/v2/users/{author}")}]
         fields = set(query["_fields"].split(",")) if query.get("_fields") else None
@@ -507,6 +532,97 @@ class BylineTests(WordPressApiTestCase):
         self.assertEqual(f({"title": {"rendered": "Derek Chu"}}), ["Derek Chu"])
         self.assertEqual(f([13, 15]), [])
         self.assertEqual(f(None), [])
+
+
+YOAST = "yoast_head_json.author"
+OWN_NAMES = {101: "Lee Ann Park", 102: "Ana Ruiz", 103: "Lee Ann Park", 107: "Tom Becker",
+             111: "Ana Ruiz", 112: "Lee Ann Park", 113: "Tom Becker"}
+
+
+class BylineFieldPerPostTests(WordPressApiTestCase):
+    """--byline-field must give each article its own post's value (issue #4)."""
+
+    def single_post_requests(self, wp):
+        return [r["route"] for r in wp.requests if re.fullmatch(r"/wp/v2/posts/\d+", r["route"] or "")]
+
+    def test_a_list_that_repeats_one_byline_is_reread_post_by_post(self):
+        # Seen on a live site: yoast_head_json.author in a list response is the first post's
+        # author on every post, and right only on /wp/v2/posts/<id>.
+        wp = self.fake(yoast_authors=OWN_NAMES, stale_yoast_lists=True)
+        articles, _, err, _ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual({n: articles[wp_id(n)]["authors"] for n in OWN_NAMES},
+                         {n: [name] for n, name in OWN_NAMES.items()})
+        self.assertIn("gives --byline-field yoast_head_json.author another post's value", err)
+        self.assertIn("one extra request per post", err)
+        self.assertNotIn("gave the same byline", err)
+        asked = wp.requests_for("/wp/v2/posts/102")[0]["query"]["_fields"].split(",")
+        self.assertIn("yoast_head_json", asked)
+
+    def test_the_stale_value_changing_from_page_to_page_does_not_hide_it(self):
+        wp = self.fake(yoast_authors=OWN_NAMES, stale_yoast_lists=True)
+        articles, *_ = self.run_import("--site", wp.base, "--byline-field", YOAST, "--per-page", "3")
+        self.assertEqual({n: articles[wp_id(n)]["authors"] for n in OWN_NAMES},
+                         {n: [name] for n, name in OWN_NAMES.items()})
+
+    def test_a_post_whose_own_response_has_no_value_falls_back_instead_of_keeping_the_stale_one(self):
+        names = dict(OWN_NAMES)
+        del names[112]  # no Yoast author of its own: the WordPress post author is used
+        wp = self.fake(yoast_authors=names, stale_yoast_lists=True, coauthors_plugin=False)
+        for post in wp.posts:  # the plugin still puts the (stale) field on every post in a list
+            names.setdefault(post["id"], None)
+        wp.yoast_authors = names
+        articles, *_ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual(articles[wp_id(112)]["authors"], ["Derek Chu"])
+        self.assertEqual(articles[wp_id(113)]["authors"], ["Tom Becker"])
+
+    def test_a_list_with_each_posts_own_value_is_spot_checked_not_reread(self):
+        wp = self.fake(yoast_authors=OWN_NAMES)
+        articles, _, err, _ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual(articles[wp_id(107)]["authors"], ["Tom Becker"])
+        self.assertEqual(self.single_post_requests(wp),
+                         [f"/wp/v2/posts/{n}" for n in (101, 102, 103, 107, 111)])
+        self.assertNotIn("another post's value", err)
+        self.assertNotIn("Note:", err)
+
+    def test_a_site_one_person_wrote_still_imports_and_says_what_it_checked(self):
+        wp = self.fake(yoast_authors={n: "Ana Ruiz" for n in OWN_NAMES})
+        articles, _, err, _ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual({tuple(a["authors"]) for a in articles.values()}, {("Ana Ruiz",)})
+        self.assertEqual(len(self.single_post_requests(wp)), 7)  # every repeat was checked
+        self.assertIn("Note: --byline-field yoast_head_json.author gave the same byline, Ana Ruiz, "
+                      "for all 7 posts that used it", err)
+        self.assertIn("own API response says the same", err)
+
+    def test_the_same_two_names_on_every_post_are_flagged(self):
+        wp = self.fake(yoast_authors={n: "By Ana Ruiz and Tom Becker" for n in OWN_NAMES})
+        articles, _, err, _ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual(articles[wp_id(101)]["authors"], ["Ana Ruiz", "Tom Becker"])
+        self.assertIn("gave the same byline, Ana Ruiz and Tom Becker, for all 7 posts", err)
+
+    def test_posts_that_fell_back_to_another_source_do_not_hide_it(self):
+        # Three posts use the field, the rest fall back to Co-Authors Plus or the post author.
+        wp = self.fake(yoast_authors={101: "Ana Ruiz", 103: "Ana Ruiz", 113: "Ana Ruiz"})
+        articles, _, err, _ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual(articles[wp_id(102)]["authors"], ["María González", "Sam O'Neil"])
+        self.assertIn("gave the same byline, Ana Ruiz, for all 3 posts that used it", err)
+
+    def test_a_check_that_cannot_be_made_is_said_so(self):
+        wp = self.fake(yoast_authors={n: "Ana Ruiz" for n in OWN_NAMES}, single_posts=False)
+        articles, _, err, _ = self.run_import("--site", wp.base, "--byline-field", YOAST)
+        self.assertEqual(articles[wp_id(113)]["authors"], ["Ana Ruiz"])
+        self.assertEqual(len(self.single_post_requests(wp)), 3)  # gives up, like the other lookups
+        self.assertIn("gave the same byline, Ana Ruiz, for all 7 posts", err)
+        self.assertIn("couldn't check that against each post's own API response (HTTP 404", err)
+        self.assertNotIn("says the same", err)
+
+    def test_private_posts_are_reread_with_the_login(self):
+        names = dict(OWN_NAMES)
+        names[106] = "Derek Chu"
+        wp = self.fake(yoast_authors=names, stale_yoast_lists=True)
+        articles, *_ = self.run_import("--site", wp.base, "--byline-field", YOAST, "--include-private",
+                                       env={wordpress_api.USER_ENV: APP_USER,
+                                            wordpress_api.PASSWORD_ENV: APP_PASSWORD})
+        self.assertEqual(articles[wp_id(106)]["authors"], ["Derek Chu"])
 
 
 class DiscoveryTests(WordPressApiTestCase):

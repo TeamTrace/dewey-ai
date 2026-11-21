@@ -347,6 +347,9 @@ _redact_url = redact_url  # backwards-compatible name
 
 # ---------------------------------------------------------------- normalize + write
 
+SAME_BYLINE_MIN = 3  # this many articles sharing the only byline seen is worth a line in the report
+
+
 @dataclass
 class ImportReport:
     source: str
@@ -354,6 +357,9 @@ class ImportReport:
     duplicates: int = 0
     skipped: Counter = field(default_factory=Counter)
     no_byline: int = 0
+    bylined: int = 0
+    first_byline: Optional[Tuple[str, ...]] = None
+    bylines_vary: bool = False
     first_date: Optional[str] = None
     last_date: Optional[str] = None
     files: List[str] = field(default_factory=list)
@@ -362,10 +368,28 @@ class ImportReport:
         self.first_date = min(self.first_date or iso, iso)
         self.last_date = max(self.last_date or iso, iso)
 
+    def note_byline(self, authors: List[str]) -> None:
+        """Count one written article's byline, so summary() can say when they are all the same."""
+        if not authors:
+            self.no_byline += 1
+            return
+        self.bylined += 1
+        if self.first_byline is None:
+            self.first_byline = tuple(authors)
+        elif tuple(authors) != self.first_byline:
+            self.bylines_vary = True
+
     def summary(self) -> str:
         lines = [f"Imported {self.written} article(s) from {self.source}."]
         if self.first_date:
             lines.append(f"  Publish dates: {self.first_date[:10]} to {self.last_date[:10]}")
+        if self.bylined >= SAME_BYLINE_MIN and not self.bylines_vary:
+            # A byline setting mapped to the wrong thing imports cleanly and credits one name with
+            # everything; the only sign is that the bylines never vary.
+            lines.append(f"  All {self.bylined} articles with a byline have the same one: "
+                         f"{' and '.join(self.first_byline)}. If the same people didn't write all of them, "
+                         "the byline is being read from the wrong place: check the byline settings and "
+                         "import again before indexing.")
         if self.no_byline:
             lines.append(f"  {self.no_byline} have no byline: they are searchable, but author filters "
                          "won't find them. No placeholder author was added.")
@@ -452,8 +476,7 @@ class ArticleWriter:
             return
         self.seen_ids.add(article["id"])
         self.seen_urls.add(url_key)
-        if not article["authors"]:
-            self.report.no_byline += 1
+        self.report.note_byline(article["authors"])
         self.report.note_date(article["publish_date"])
         self.batch.append(article)
         self.report.written += 1
