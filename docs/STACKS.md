@@ -100,7 +100,7 @@ A *stack default* can be switched: see [Mixing hosted and local search models](#
 - Microsoft keeps Dewey's responses for 30 days, because Dewey doesn't send `store=false`.
 - Dewey logs each search's bylines and dates to its error output. The Postgres setups don't.
 
-**How it's been tested:** The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. Since this fork began in November 2026, which changed how Dewey filters, cites and shows answers, nobody has run it against Azure, and no automated test covers it.
+**How it's been tested:** The Philadelphia Inquirer built Dewey on this setup, and the original project thanks three alpha testers in its newsroom. Since this fork began in November 2026, which changed how Dewey filters, cites and shows answers, nobody has run it against Azure. The only automated tests check the date and byline filter Dewey writes for Azure AI Search, and they never contact Azure.
 
 **Set it up:** in the setup wizard, choose `azure` at "Which stack?" and answer its 11 Azure questions ([AZURE.md](AZURE.md#with-the-setup-wizard)). Or put these lines in `.env` (a file in [the Dewey folder](GLOSSARY.md#dewey-folder)) with a text editor, not a [terminal](GLOSSARY.md#terminal), changing any that are already there ([how](#configuring-by-hand)):
 

@@ -1,5 +1,6 @@
 """
-Tests for the Postgres store's search filters (app/providers/pgvector_store.py).
+Tests for the Postgres store's search filters (app/providers/pgvector_store.py),
+including the author entries it refuses rather than leaves out of the filter.
 
 The unit tests need the packages in requirements.txt but no database. The
 PostgresFilterTests run the SQL for real against a throwaway Postgres with
@@ -30,7 +31,7 @@ try:
     import psycopg
     from pgvector.psycopg import register_vector
 
-    from providers import pgvector_store
+    from providers import base, pgvector_store
     from providers.pgvector_store import HYBRID_SQL, build_where
 except ImportError as e:  # pragma: no cover
     pgvector_store = None
@@ -44,6 +45,19 @@ DATABASE_URL = os.environ.get("DEWEY_TEST_DATABASE_URL", "").strip()
 def meta(authors=(), start=None, end=None):
     return {"question": "q", "date_range": {"start_date": start, "end_date": end},
             "authors": [{"name": a} for a in authors]}
+
+
+class FakeEmbedder:
+    """Stands in for an Embedder (providers/embeddings.py): counts the calls, loads no model
+    and contacts nothing."""
+    model, dim = "fake", 3
+
+    def __init__(self):
+        self.calls = 0
+
+    def embed(self, texts, input_type):
+        self.calls += 1
+        return [[0.1, 0.2, 0.3] for _ in texts]
 
 
 @unittest.skipIf(pgvector_store is None, IMPORT_ERROR)
@@ -87,16 +101,68 @@ class BuildWhereTests(unittest.TestCase):
 
     def test_requested_names_are_cleaned(self):
         _, params = build_where({"question": "q", "authors": [
-            {"name": "  jane   doe "}, {"name": "Jane Doe"}, {"name": "   "}, {"name": None}, {}, "Sam Lee",
+            {"name": "  jane   doe "}, {"name": "Jane Doe"}, {"name": "   "}, {"name": None}, {"name": "Sam Lee"},
             {"name": "Sam\tLee"}]})
         self.assertEqual(params, {"authors": ["jane doe", "Sam Lee"]})
         self.assertEqual(build_where(meta(["", " "])), ("TRUE", {}))
+
+    def test_plain_string_author_is_refused(self):
+        # It used to be left out without a word, which made this ("TRUE", {}): a search of every
+        # writer's stories. The rules are in providers/base.py (author_names).
+        with self.assertRaises(base.MetadataError):
+            build_where({"question": "q", "authors": ["Jane Doe"]})
+
+    def test_mixed_author_list_is_refused(self):
+        # It used to filter on John Roe alone, so Jane Doe's stories went missing without a word.
+        with self.assertRaises(base.MetadataError):
+            build_where({"question": "q", "authors": ["Jane Doe", {"name": "John Roe"}]})
+
+    def test_other_malformed_authors_are_refused(self):
+        # Each of these used to give ("TRUE", {}) too. The last two are an "authors" value that
+        # is not a list: a bare string and a single entry.
+        for authors in ([{}], [None], [{"name": 5}], "Jane Doe", {"name": "Jane Doe"}):
+            with self.subTest(authors=authors), self.assertRaises(base.MetadataError):
+                build_where({"question": "q", "authors": authors})
 
     def test_authors_and_dates_combine(self):
         where, params = build_where(meta(["Jane Doe"], start="2024-01-01"))
         self.assertTrue(where.startswith("a.publish_date >= "))
         self.assertTrue(where.endswith(pgvector_store.AUTHOR_MATCH_SQL))
         self.assertEqual(set(params), {"start_date", "authors"})
+
+
+@unittest.skipIf(pgvector_store is None, IMPORT_ERROR)
+class RetrieveTests(unittest.TestCase):
+    """PgVectorStore.retrieve() up to the point where it opens the database: a stand-in
+    embedder, and connect() replaced so that no connection is ever attempted."""
+
+    def store(self):
+        embedder = FakeEmbedder()
+        store = pgvector_store.PgVectorStore(
+            pgvector_store.PgVectorConfig("postgresql://unused.invalid/dewey"), embedder, reranker=None)
+        return store, embedder
+
+    def test_malformed_author_stops_the_search_before_the_embedding_call(self):
+        # The embedding call can cost money, and a failure there would hide the clear error.
+        store, embedder = self.store()
+        store.connect = lambda: self.fail("the store connected to the database")
+        with self.assertRaises(base.MetadataError):
+            store.retrieve({"question": "q", "authors": ["Jane Doe"]})
+        self.assertEqual(embedder.calls, 0)
+
+    def test_well_formed_request_embeds_the_question_then_opens_the_database(self):
+        # The filter is built first, but a request it accepts still goes on to search.
+        class Reached(Exception):
+            pass
+
+        def connect():
+            raise Reached()
+
+        store, embedder = self.store()
+        store.connect = connect
+        with self.assertRaises(Reached):
+            store.retrieve(meta(["Jane Doe"], start="2024-01-01"))
+        self.assertEqual(embedder.calls, 1)
 
 
 @unittest.skipIf(pgvector_store is None, IMPORT_ERROR)

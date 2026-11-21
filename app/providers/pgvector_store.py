@@ -27,7 +27,7 @@ import psycopg
 from dateutil.parser import parse
 from pgvector.psycopg import register_vector
 
-from .base import UserFacingError
+from .base import UserFacingError, author_names
 from .embeddings import Embedder, Reranker
 
 # Azure's SplitSkill used 512 tokens with 96 overlap. English prose averages
@@ -146,22 +146,21 @@ BYLINE_KEYS_SQL = (
 AUTHOR_MATCH_SQL = f"{BYLINE_KEYS_FUNCTION}(a.authors) && {BYLINE_KEYS_FUNCTION}(%(authors)s::text[])"
 
 
-def _clean_author_names(authors: Any) -> List[str]:
-    """Requested byline names, whitespace-collapsed, without blanks or case-insensitive repeats."""
-    names, seen = [], set()
-    for author in authors or []:
-        name = author.get("name") if isinstance(author, dict) else None
-        if not isinstance(name, str):
-            continue
+def _clean_author_names(names: Iterable[str]) -> List[str]:
+    """Requested byline names, whitespace-collapsed, without case-insensitive repeats. The names
+    come from base.author_names(), which has refused malformed entries and skipped blank ones."""
+    cleaned, seen = [], set()
+    for name in names:
         name = " ".join(name.split())  # str.split() also splits on no-break and other Unicode spaces
         if name and name.casefold() not in seen:
             seen.add(name.casefold())
-            names.append(name)
-    return names
+            cleaned.append(name)
+    return cleaned
 
 
 def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
-    """SQL filter on `articles a`, equivalent to the Azure OData filter. Values are bound, never interpolated."""
+    """SQL filter on `articles a`, equivalent to the Azure OData filter. Values are bound, never interpolated.
+    Raises MetadataError (base.py) for an author entry it can't use, rather than leaving it out."""
     clauses, params = [], {}
     date_range = dict(metadata.get("date_range") or {})
     for key in ("start_date", "end_date"):
@@ -177,7 +176,7 @@ def build_where(metadata: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         # Inclusive end date in UTC, like `le {end}T23:59:59Z` in the Azure path.
         clauses.append("a.publish_date < (%(end_date)s::date + 1)::timestamp AT TIME ZONE 'UTC'")
         params["end_date"] = date_range["end_date"]
-    authors = _clean_author_names(metadata.get("authors"))
+    authors = _clean_author_names(author_names(metadata))
     if authors:
         # Any listed author, ignoring case and spacing (see _NORMALIZED_NAME), through the
         # articles_byline_keys_idx index. The Azure path's `a eq '...'` is exact; a journalist
@@ -336,9 +335,11 @@ class PgVectorStore:
 
     def retrieve(self, metadata: Dict[str, Any]) -> List[str]:
         question = metadata["question"]
-        qvec = self.embedder.embed([question], input_type="query")[0]
-
+        # First, so a malformed author entry (MetadataError) stops the search before the
+        # embedding call, which can cost money, and before the database is contacted.
         where, params = build_where(metadata)
+
+        qvec = self.embedder.embed([question], input_type="query")[0]
         params.update(qvec=np.asarray(qvec, dtype=np.float32), qtext=question,
                       k=CANDIDATES_PER_METHOD, rrf_k=RRF_K)
 
