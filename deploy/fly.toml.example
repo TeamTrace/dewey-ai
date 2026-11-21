@@ -19,7 +19,8 @@ primary_region = "ord"      # three-letter Fly region code; put it near your dat
 # Non-secret settings.
 [env]
   DEWEY_STACK = "anthropic"
-  # NEWSROOM_NAME = "Your Newsroom"
+  # Required: the server won't start without it. Use the same name as the .env you index with.
+  NEWSROOM_NAME = "Your Newsroom"
 
 [http_service]
   internal_port = 8765           # the Dockerfile's command listens on 8765

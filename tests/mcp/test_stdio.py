@@ -91,6 +91,15 @@ class StdioClientTest(unittest.IsolatedAsyncioTestCase):
 class RawStdoutTest(unittest.TestCase):
     """Speak JSON-RPC by hand and check that every line on stdout is a JSON-RPC message."""
 
+    def test_the_server_refuses_to_start_without_a_newsroom_name(self):
+        # Unset and blank are the same; either used to mean "The Philadelphia Inquirer" (#14).
+        for name in ("", "   "):
+            result = run_server([], server_env(NEWSROOM_NAME=name))
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("configuration error: NEWSROOM_NAME is not set", result.stderr)
+            self.assertNotIn("Inquirer", result.stderr)
+
     def test_stray_prints_never_reach_stdout(self):
         proc = subprocess.Popen(
             # server_env sets PYTHONUNBUFFERED=1 so a stray write reaches the pipe at once. Without it,

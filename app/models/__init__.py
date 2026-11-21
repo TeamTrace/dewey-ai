@@ -1,5 +1,5 @@
 from .retrieve import SearchParams, DateRange, SearchMetadata, SearchDateRange, SearchAuthor
-from .core import AzureSearchConfig, AzureOpenAIConfig, NewsroomConfig
+from .core import AzureSearchConfig, AzureOpenAIConfig, NewsroomConfig, NewsroomConfigError
 
 __all__ = [
     "SearchParams",
@@ -10,4 +10,5 @@ __all__ = [
     "AzureSearchConfig",
     "AzureOpenAIConfig",
     "NewsroomConfig",
+    "NewsroomConfigError",
 ]

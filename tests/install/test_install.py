@@ -216,7 +216,7 @@ class WizardImportTests(unittest.TestCase):
         ("Choose a number or name", "none"),     # reranking
         # "later": no database, so no checks, no indexing, nothing reaches Postgres
         (r"Do you have a Postgres database[\s\S]*?Choose a number or name", "later"),
-        ("Newsroom name", ""),
+        ("Newsroom name", "The Example Times"),
         ("Earliest article date", ""),
         ("Region", "none"),
     ]
@@ -415,6 +415,21 @@ class WizardImportTests(unittest.TestCase):
             if line.startswith("DEWEY_MCP_TOKEN="):
                 return line.split("=", 1)[1].strip("'")
         return None
+
+    def test_a_blank_newsroom_name_is_asked_again(self):
+        # A blank answer used to be accepted and left NEWSROOM_NAME out of .env, and Dewey then
+        # called the archive The Philadelphia Inquirer's (#14).
+        at = self.OPEN_STACK.index(("Newsroom name", "The Example Times"))
+        script = (self.OPEN_STACK[:at]
+                  + [("Newsroom name", ""),
+                     (r"This one is required\.[\s\S]*Newsroom name", "The Example Times")]
+                  + self.OPEN_STACK[at + 1:])
+        out, status = self.wizard(script + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        env = (self.root / ".env").read_text()
+        self.assertIn("NEWSROOM_NAME='The Example Times'", env)
+        self.assertNotIn("ARCHIVE_START_DATE", env)  # optional: Dewey then states no start date
+        self.assertNotIn("Inquirer", out)
 
     def test_skip_and_existing_json(self):
         out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])

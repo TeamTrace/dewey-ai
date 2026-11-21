@@ -28,7 +28,10 @@ REQUIRED_FIELDS = ["headline", "content", "url", "authors", "publish_date"]
 
 
 def own_publisher() -> str:
-    """The newsroom whose archive this is, for documents that name no publisher."""
+    """
+    The newsroom whose archive this is, for documents that name no publisher.
+    Raises NewsroomConfigError when NEWSROOM_NAME is unset or blank: there is no default name.
+    """
     from models import NewsroomConfig
     return NewsroomConfig.from_env().publisher
 
@@ -54,12 +57,16 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
     (a feed's guid, a CMS post id), so another source, such as a partner's or a
     compromised feed, can reuse them; the document indexed last would silently
     replace the other one.
+
+    Raises NewsroomConfigError when a document names no publisher and NEWSROOM_NAME
+    isn't set: it would otherwise be labelled with a name nobody chose.
     """
     from providers.pgvector_store import article_id
 
     documents = []
     seen: Dict[str, Tuple[str, str]] = {}  # id -> (file, url) of its first document
     conflicts = []
+    own = None  # looked up only when a document needs it
     json_files = sorted(data_folder.glob("*.json"))
     if not json_files:
         print(f"📁 No JSON documents found. Place them in: {data_folder}")
@@ -88,7 +95,9 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
             # A document that doesn't say where it came from is the newsroom's own.
             # Naming it here is what lets an answer distinguish your reporting from
             # material collected elsewhere.
-            doc.setdefault("publisher", own_publisher())
+            if not str(doc.get("publisher") or "").strip():
+                own = own or own_publisher()
+                doc["publisher"] = own
             documents.append(doc)
             valid += 1
         print(f"✅ Loaded {valid} valid document(s) from {path.name}")
@@ -104,6 +113,7 @@ def load_documents(data_folder: Path = DATA_FOLDER) -> List[Dict[str, Any]]:
 
 def main() -> None:
     load_dotenv(REPO_ROOT / ".env", interpolate=False)  # values are literal
+    from models import NewsroomConfigError
     from providers import StackConfigError, build_pgvector_store, current_stack, retrieval_providers
 
     try:
@@ -130,6 +140,10 @@ def main() -> None:
         documents = load_documents()
     except ConflictingIdsError as e:
         print(f"❌ {e}")
+        sys.exit(1)
+    except NewsroomConfigError as e:
+        print(f"❌ Articles that name no publisher are labelled with your newsroom's name, and none is "
+              f"set, so nothing was indexed. {e}")
         sys.exit(1)
     if not documents:
         return

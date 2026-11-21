@@ -269,12 +269,21 @@ class MainFunctionTest(unittest.TestCase):
         # Point at an empty config directory: a profile from `ant auth login` is itself a
         # valid credential, so without this the result depends on the developer's machine.
         config_dir = self.enterContext(tempfile.TemporaryDirectory())
-        code, out, err, build_ui = self.run_main({"DEWEY_STACK": "anthropic",
+        code, out, err, build_ui = self.run_main({"DEWEY_STACK": "anthropic", "NEWSROOM_NAME": "The Example Times",
                                                   "ANTHROPIC_CONFIG_DIR": config_dir})
         self.assertEqual(code, 1)
         self.assertIn("ANTHROPIC_API_KEY", err)
         self.assertIn("Listening on 127.0.0.1", out)
         build_ui.assert_not_called()
+
+    def test_missing_newsroom_name_exits_1_with_message(self):
+        # There is no default newsroom: it used to be The Philadelphia Inquirer (#14).
+        for env in ({}, {"NEWSROOM_NAME": " "}):
+            code, _, err, build_ui = self.run_main(env)
+            self.assertEqual(code, 1)
+            self.assertIn("NEWSROOM_NAME is not set", err)
+            self.assertNotIn("Inquirer", err)
+            build_ui.assert_not_called()
 
     def test_blank_gradio_variables_are_removed_before_gradio_reads_them(self):
         with mock.patch.dict(os.environ, {"GRADIO_SERVER_PORT": "", "GRADIO_SERVER_NAME": " "}, clear=True), \
@@ -290,7 +299,7 @@ class MainFunctionTest(unittest.TestCase):
         import gradio as gr
 
         env = {"GRADIO_SERVER_NAME": "0.0.0.0", "GRADIO_SERVER_PORT": "7999", "DEWEY_CONCURRENCY": "3",
-               PUBLISHED: "true"}
+               PUBLISHED: "true", "NEWSROOM_NAME": "The Example Times"}
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch("dotenv.load_dotenv"), \
                 mock.patch("providers.build_stack", return_value=(object(), object())), \

@@ -1,10 +1,7 @@
-from typing import Optional
-
 from models import NewsroomConfig
 from textwrap import dedent
 
-def load_answer_prompt(current_date: str, newsroom: Optional[NewsroomConfig] = None) -> str:
-    newsroom = newsroom or NewsroomConfig()
+def load_answer_prompt(current_date: str, newsroom: NewsroomConfig) -> str:
     return dedent(f"""
         You are Dewey, an assistant created by The Philadelphia Inquirer for all newsrooms.
 

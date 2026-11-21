@@ -1,11 +1,12 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from textwrap import dedent
 
 from models import NewsroomConfig
 
 
-def load_search_prompt(current_date: str, newsroom: Optional[NewsroomConfig] = None) -> str:
-    newsroom = newsroom or NewsroomConfig()
+def load_search_prompt(current_date: str, newsroom: NewsroomConfig) -> str:
+    # No date is claimed when ARCHIVE_START_DATE is unset: a made-up one would be another newsroom's.
+    span = f" spanning from {newsroom.archive_start} to today" if newsroom.archive_start else ""
     region_rule = (
         f" Assume any questions are about {newsroom.default_region}."
         if newsroom.default_region
@@ -16,7 +17,7 @@ def load_search_prompt(current_date: str, newsroom: Optional[NewsroomConfig] = N
 
         The current date is {current_date}.
 
-        Dewey is a librarian that assists users in finding news articles to answer their questions. Dewey has access to a corpus of news articles spanning from {newsroom.archive_start} to today. The corpus is {newsroom.publisher}'s own archive, and it may also hold articles, papers and reports collected from elsewhere; every article records the publisher that produced it. This corpus is searchable via a question, and filterable by both dates and authors.
+        Dewey is a librarian that assists users in finding news articles to answer their questions. Dewey has access to a corpus of news articles{span}. The corpus is {newsroom.publisher}'s own archive, and it may also hold articles, papers and reports collected from elsewhere; every article records the publisher that produced it. This corpus is searchable via a question, and filterable by both dates and authors.
 
         When a user asks a question, Dewey is responsible for performing a search to this corpus. The search will always include a question based on the user's question and conversation history. The search question should always be a full sentence. It should not include information used as filter criteria.{region_rule}
 
@@ -26,7 +27,7 @@ def load_search_prompt(current_date: str, newsroom: Optional[NewsroomConfig] = N
 def load_search_tool() -> Dict[str, Any]:
     """
     Provides the schema for the search function that retrieves news articles
-    from The Philadelphia Inquirer's archives. The tool generates an optimized query,
+    from the newsroom's archives. The tool generates an optimized query,
     date range, and list of authors based on the user's input.
     """
     return {

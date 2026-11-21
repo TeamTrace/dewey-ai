@@ -703,6 +703,34 @@ class EndToEndTests(TempDirTest):
             code = import_archive.main(argv)
         return code, out.getvalue(), err.getvalue()
 
+    def test_publisher_option_names_the_publisher_on_every_article(self):
+        # For a source that isn't the newsroom's own: without it the indexer labels the articles
+        # with NEWSROOM_NAME, presenting a partner's stories as the newsroom's (#14).
+        out_dir = self.tmp / "partner"
+        code, out, err = self.main(["csv", "--file", fx("articles.csv"), "--out-dir", str(out_dir),
+                                    "--publisher", " Partner   Daily "])
+        self.assertEqual(code, 0, err)
+        articles = json.loads(next(out_dir.glob("*.json")).read_text(encoding="utf-8"))
+        self.assertEqual({a["publisher"] for a in articles}, {"Partner Daily"})
+        self.assertIn("Publisher on every article: Partner Daily", out)
+
+    def test_without_the_publisher_option_articles_name_none(self):
+        out_dir = self.tmp / "own"
+        code, out, err = self.main(["csv", "--file", fx("articles.csv"), "--out-dir", str(out_dir)])
+        self.assertEqual(code, 0, err)
+        articles = json.loads(next(out_dir.glob("*.json")).read_text(encoding="utf-8"))
+        self.assertTrue(all("publisher" not in a for a in articles))
+        self.assertNotIn("Publisher on every article", out)
+
+    def test_every_importer_has_the_publisher_option(self):
+        parser, modules = import_archive.build_parser()
+        subparsers = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+        self.assertEqual(set(subparsers.choices), set(modules))
+        for name, sub in subparsers.choices.items():
+            self.assertIn("--publisher NAME", sub.format_help(), name)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            parser.parse_args(["csv", "--file", "x.csv", "--publisher", "  "])
+
     def test_import_writes_json(self):
         out_dir = self.tmp / "data"
         code, out, err = self.main(["csv", "--file", fx("articles.csv"), "--out-dir", str(out_dir)])
