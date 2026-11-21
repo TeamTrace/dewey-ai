@@ -190,5 +190,37 @@ class WriterTests(unittest.TestCase):
         self.assertEqual([a["id"] for a in json.loads((out / "src-0001.json").read_text())], ["t-9"])
 
 
+class SameBylineReportTests(unittest.TestCase):
+    """A byline setting that reads the wrong thing imports cleanly; the report has to say so (#4)."""
+
+    def summary(self, bylines):
+        report = ImportReport("t")
+        with ArticleWriter(pathlib.Path(tempfile.mkdtemp()), "src", report) as w:
+            for i, authors in enumerate(bylines):
+                w.add({"id": f"t-{i}", "headline": f"H{i}", "content": "text", "url": f"https://x.example/{i}",
+                       "authors": authors, "publish_date": "2024-01-01T00:00:00Z"})
+        return report.summary()
+
+    def test_one_name_on_every_article_is_said(self):
+        self.assertIn("All 4 articles with a byline have the same one: Ana Ruiz.",
+                      self.summary([["Ana Ruiz"]] * 4))
+
+    def test_the_same_two_names_on_every_article_are_said(self):
+        self.assertIn("have the same one: Ana Ruiz and Tom Becker.",
+                      self.summary([["Ana Ruiz", "Tom Becker"]] * 3))
+
+    def test_articles_without_a_byline_do_not_hide_it(self):
+        text = self.summary([["Ana Ruiz"], [], ["Ana Ruiz"], ["Ana Ruiz"]])
+        self.assertIn("All 3 articles with a byline have the same one", text)
+        self.assertIn("1 have no byline", text)
+
+    def test_bylines_that_vary_are_not_mentioned(self):
+        self.assertNotIn("the same one", self.summary([["Ana Ruiz"], ["Ana Ruiz"], ["Tom Becker"]]))
+        self.assertNotIn("the same one", self.summary([["Ana Ruiz", "Tom Becker"], ["Ana Ruiz"], ["Ana Ruiz"]]))
+
+    def test_two_articles_are_too_few_to_say(self):
+        self.assertNotIn("the same one", self.summary([["Ana Ruiz"]] * 2))
+
+
 if __name__ == "__main__":
     unittest.main()

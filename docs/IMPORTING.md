@@ -239,6 +239,16 @@ Imported 6 article(s) from csv.
 The CSV importer also prints its column mapping first: check that each Dewey field comes from the right
 column.
 
+If every story with a byline has the same one, the report says so:
+
+```text
+  All 20 articles with a byline have the same one: Jane Doe. If the same people didn't write all of them, the byline is being read from the wrong place: check the byline settings and import again before indexing.
+```
+
+On WordPress, `--byline-field` is read from the site's list of posts and checked against each post's own
+page in the API, because some plugins put one post's byline on every post in a list. When the two
+disagree, the importer says so and reads every post on its own, which takes one extra request per post.
+
 After a trial run, the setup wizard also checks the articles it kept, because a wrongly mapped field
 imports without error. If all is well:
 
@@ -252,7 +262,7 @@ importer yourself, check the same things by eye:
 | The wizard says | Marked | What to do |
 |---|---|---|
 | None of the 20 articles has a byline. | worth knowing | [Author filters](GLOSSARY.md#byline-filter) will match nothing. Try `--byline-field` or a WordPress export file. |
-| All 20 articles are credited to 'Jane Doe'. | needs a look | The byline isn't per article (Yoast's `yoast_head_json` does this). Use another field or an export file. |
+| All 20 articles are credited to 'Jane Doe'. | needs a look | Unless one person wrote them all, the byline is read from the wrong place. Use another field or an export file. |
 | 2 byline(s) hold more than one name in one string | worth knowing | Filters match whole bylines ([the rule](MCP.md#the-two-tools)): split them (CSV: `--authors-sep`). |
 | 2 article id(s) appear more than once | needs a look | Indexing keeps one per id. Give each source its own `--prefix`. |
 | 3 of 20 articles have no usable url. | worth knowing | They can be found but not cited. Check the importer reads the public link. |

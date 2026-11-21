@@ -738,11 +738,10 @@ def review_import(docs: List[dict], plan: Optional["ImportPlan"] = None) -> List
         found.append(ImportFinding(
             True,
             f"All {total} articles are credited to {sorted(names)[0]!r}.",
-            "One name on everything means the byline field isn't computed per article. "
-            "Yoast's yoast_head_json behaves this way in a list response, so "
-            "--byline-field yoast_head_json.author reads the same name every time. Drop "
-            "that option, point it at a field that varies per article, or import a "
-            "WordPress export file instead.",
+            "If one person didn't write them all, the byline is being read from something "
+            "that isn't each article's own byline. Compare a few with the live site, then "
+            "point the byline setting (--byline-field on WordPress and Drupal) at a field "
+            "that varies per article, or import a WordPress export file instead.",
         ))
 
     composite = sorted(a for a in names if re.search(r"\s+and\s+|,", a))

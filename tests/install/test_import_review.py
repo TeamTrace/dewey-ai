@@ -77,7 +77,10 @@ class BylineTest(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertTrue(findings[0].stop, "a uniform byline should stop the full import")
         self.assertIn("'Afea Tucker'", findings[0].saw)
-        self.assertIn("yoast_head_json", findings[0].fix)
+        self.assertIn("Compare a few with the live site", findings[0].fix)
+        # The importer now reads yoast_head_json.author post by post (#4), so the advice no
+        # longer blames that field.
+        self.assertNotIn("yoast", findings[0].fix)
 
     def test_one_shared_byline_among_several_is_not_flagged(self):
         docs = corpus()

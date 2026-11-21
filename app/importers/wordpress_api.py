@@ -13,6 +13,11 @@ Bylines come from Co-Authors Plus when the site exposes its coauthors/v1 API
 (one extra request per post), otherwise from the WordPress post author. A post
 whose byline can't be read gets `authors: []`; no other name is substituted.
 
+--byline-field values come from the list of posts, checked against each post's
+own response (/wp/v2/posts/<id>): some plugins put one post's value on every
+post in a list. The first few posts and every post that repeats the previous
+post's value are checked; after one disagreement every post is read on its own.
+
 Standard library only.
 """
 import argparse
@@ -26,7 +31,8 @@ from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from importers.common import ImporterError, clean_text, http_get, http_get_json, parse_date
+from importers.common import (SAME_BYLINE_MIN, ImporterError, clean_text, http_get, http_get_json,
+                              parse_date)
 
 NAME = "wordpress-api"
 HELP = "Published posts from a live WordPress site, read through its REST API (no login needed)."
@@ -138,7 +144,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="only posts published before this date (the site's local time)")
     parser.add_argument("--byline-field", type=_field_path_arg, metavar="FIELD",
                         help="read bylines from this field of each post first, e.g. acf.byline, for sites "
-                             "that keep bylines in a custom field exposed to the REST API")
+                             "that keep bylines in a custom field exposed to the REST API (checked against "
+                             "each post's own API response, which can take one extra request per post)")
     parser.add_argument("--user", metavar="USERNAME",
                         help=f"WordPress username for the Application Password (or set {USER_ENV})")
     parser.add_argument("--app-password", metavar="PASSWORD",
@@ -573,11 +580,29 @@ def _names_from_value(value: Any, split: bool = True) -> List[str]:
     return []  # numbers (term or user ids) are not names
 
 
+FIELD_FIRST_CHECKS = 5  # posts whose --byline-field value is always compared with their own response
+
+
+def _shown(names: List[str]) -> str:
+    return " and ".join(names)
+
+
 class _Bylines:
     def __init__(self, client: _Client, api: _Api, coauthors_api: bool, byline_field: Optional[str]):
         self.client, self.api = client, api
         self.coauthors_api = coauthors_api
+        self.field = byline_field or ""
         self.field_path = byline_field.split(".") if byline_field else []
+        self.field_reread = False     # the list was caught giving a post another post's value
+        self.field_checked = 0        # list values that agreed with the post's own response
+        self.field_unchecked = 0      # list values kept without that check, because it failed
+        self.field_check_failures = 0
+        self.field_checks_off = False
+        self.field_error = ""
+        self.field_last: Optional[List[str]] = None  # the previous post's value in the list
+        self.field_used = 0           # posts whose byline came from the field
+        self.field_values: set = set()
+        self.field_unread = 0
         self.users: Dict[int, List[str]] = {}
         self.user_ok = 0
         self.user_failures = 0
@@ -590,10 +615,16 @@ class _Bylines:
         self.hidden = 0
         self.announced = False
 
-    def resolve(self, post: Dict[str, Any]) -> List[str]:
+    def resolve(self, post: Dict[str, Any], rest_base: str = "posts") -> List[str]:
         if self.field_path:
-            names = _names_from_value(_dig(post, self.field_path))
+            names = self._field_names(post, rest_base)
+            if names is None:
+                self.field_unread += 1
+                return []
             if names:
+                self.field_used += 1
+                if len(self.field_values) < 2:
+                    self.field_values.add(tuple(names))
                 return names
         terms = post.get("coauthors")
         if isinstance(terms, list):
@@ -608,6 +639,59 @@ class _Bylines:
             if names:
                 return names
         return self._core_author(post)
+
+    def _field_names(self, post: Dict[str, Any], rest_base: str) -> Optional[List[str]]:
+        """
+        This post's --byline-field names: [] if it has none, None if they couldn't be read.
+
+        A list of posts is one request for many posts, and some plugins fill a field once per
+        request: Yoast SEO's yoast_head_json.author was seen carrying the first post's author on
+        every post of a list. So a list value is compared with the post's own response for the
+        first few posts and whenever it repeats the previous post's value, which is what a stale
+        value looks like. One disagreement and every later post is read on its own.
+        """
+        if self.field_reread:
+            return self._own_field(post, rest_base)
+        listed = _names_from_value(_dig(post, self.field_path))
+        if not listed:
+            return listed
+        repeats = listed == self.field_last
+        self.field_last = listed
+        if self.field_checks_off:
+            self.field_unchecked += 1
+            return listed
+        if not repeats and self.field_checked >= FIELD_FIRST_CHECKS:
+            return listed
+        own = self._own_field(post, rest_base)
+        if own is None:
+            self.field_unchecked += 1
+            self.field_check_failures += 1
+            if not self.field_checked and self.field_check_failures >= 3:
+                self.field_checks_off = True
+            return listed
+        if own == listed:
+            self.field_checked += 1
+            return listed
+        self.field_reread = True
+        print(f"  The list of posts gives --byline-field {self.field} another post's value (post "
+              f"{_int_id(post.get('id'))}: the list says {_shown(listed)}, the post itself says "
+              f"{_shown(own) if own else 'nothing'}). Reading each post's byline from its own API response "
+              "instead: one extra request per post.", file=sys.stderr)
+        return own
+
+    def _own_field(self, post: Dict[str, Any], rest_base: str) -> Optional[List[str]]:
+        pid = _int_id(post.get("id"))
+        if pid is None:
+            return None
+        try:
+            data, _ = self.client.get(self.api.url(f"/wp/v2/{rest_base}/{pid}"),
+                                      {"_fields": f"id,{self.field_path[0]}"}, retries=2)
+            if not isinstance(data, dict):
+                raise _WPError("the post's own response was not a post", kind="unexpected response")
+        except _WPError as e:
+            self.field_error = e.short()
+            return None
+        return _names_from_value(_dig(data, self.field_path))
 
     def _coauthors(self, post_id: Any) -> Optional[List[str]]:
         pid = _int_id(post_id)
@@ -682,6 +766,22 @@ class _Bylines:
 
     def notes(self) -> List[str]:
         notes = []
+        if self.field_unread:
+            notes.append(f"Note: {self.field_unread} post(s) have no authors because the list of posts gave "
+                         f"them another post's --byline-field value and their own API response couldn't be "
+                         f"read ({self.field_error}). No other name was substituted; re-run to try again.")
+        if self.field_used >= SAME_BYLINE_MIN and len(self.field_values) == 1:
+            if self.field_unchecked:
+                checked = (f"The importer couldn't check that against each post's own API response "
+                           f"({self.field_error}), and some plugins put one post's value on every post in a "
+                           "list.")
+            else:
+                checked = "Each post's own API response says the same, so that is what the site holds."
+            notes.append(f"Note: --byline-field {self.field} gave the same byline, "
+                         f"{_shown(list(next(iter(self.field_values))))}, for all {self.field_used} posts that "
+                         f"used it. {checked} If the same people didn't write all of them, this field isn't "
+                         "each post's byline: import again with another field, or without --byline-field, "
+                         "before indexing.")
         if self.cap_missing:
             notes.append(f"Note: {self.cap_missing} post(s) have no authors because their Co-Authors Plus "
                          f"bylines couldn't be read ({self.cap_error}). No other author was substituted. If "
@@ -713,6 +813,7 @@ def _status_reason(status: str) -> str:
 class _Context:
     def __init__(self, site_key: str, site_tz: Optional[tzinfo], bylines: _Bylines, include_private: bool):
         self.site_key, self.site_tz, self.bylines, self.include_private = site_key, site_tz, bylines, include_private
+        self.rest_base = "posts"
 
 
 def _to_raw(post: Any, ctx: _Context) -> Dict[str, Any]:
@@ -749,7 +850,7 @@ def _to_raw(post: Any, ctx: _Context) -> Dict[str, Any]:
     }
     # Only spend byline requests on posts normalize() will keep.
     if pid and raw["headline"].strip() and raw["url"] and raw["content_html"].strip():
-        raw["authors"] = ctx.bylines.resolve(post)
+        raw["authors"] = ctx.bylines.resolve(post, ctx.rest_base)
     return raw
 
 
@@ -915,6 +1016,7 @@ def iter_articles(args) -> Iterator[Dict[str, Any]]:
     listed = withheld_total = 0
     try:
         for rest_base in post_types:
+            ctx.rest_base = rest_base
             for post in _paginate(client, api, rest_base, params, per_page, label, stats):
                 listed += 1
                 yield _to_raw(post, ctx)
