@@ -511,7 +511,7 @@ Run the commands below on your computer, in the Dewey folder.
 
 > [!WARNING]
 > **Set the same newsroom settings in `fly.toml` as in your `.env`.**
-> The server falls back to The Philadelphia Inquirer's for any of `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION` you leave out.
+> The server won't start without `NEWSROOM_NAME`. Without `ARCHIVE_START_DATE` it states no start date, and without `DEFAULT_REGION` it assumes no region.
 > Your computer's indexer labels articles without a `publisher` with your `.env`'s `NEWSROOM_NAME`, so if the names differ, answers present your own reporting as another outlet's.
 
 1. **Install `flyctl` and log in**, following [Fly's docs](https://github.com/superfly/docs).
@@ -674,7 +674,7 @@ The example Blueprint in step 3 runs the [Claude with Voyage AI](STACKS.md#claud
 
 > [!WARNING]
 > **Set the same newsroom settings in Render as in your `.env`.**
-> The server falls back to The Philadelphia Inquirer's for any of `NEWSROOM_NAME`, `ARCHIVE_START_DATE` and `DEFAULT_REGION` you leave out.
+> The server won't start without `NEWSROOM_NAME`. Without `ARCHIVE_START_DATE` it states no start date, and without `DEFAULT_REGION` it assumes no region.
 > Your computer's indexer labels articles without a `publisher` with your `.env`'s `NEWSROOM_NAME`, so if the names differ, answers present your own reporting as another outlet's.
 
 1. **Create the database** on Neon or Supabase, and switch on pgvector ([how](#managed-postgres-with-pgvector)).
@@ -721,11 +721,10 @@ The example Blueprint in step 3 runs the [Claude with Voyage AI](STACKS.md#claud
    cp deploy/render.yaml.example render.yaml
    ```
 
-   Add your newsroom settings at the end of its `envVars` list, indented like the other `- key:` lines:
+   In it, change `Your Newsroom` to your newsroom's name (the server won't start without `NEWSROOM_NAME`).
+   Add the other newsroom settings at the end of its `envVars` list, indented like the other `- key:` lines:
 
    ```yaml
-         - key: NEWSROOM_NAME
-           value: Your Newsroom
          - key: ARCHIVE_START_DATE
            value: January 1, 2015
          - key: DEFAULT_REGION
@@ -813,7 +812,8 @@ Set these in `.env`, the Compose file, `fly secrets` or `fly.toml` `[env]`, or t
 | `DEWEY_MCP_TOKEN` | required for HTTP | Bearer token clients send: at least 32 letters, digits or `- . _ ~ + /` (and `=` at the end) |
 | `POSTGRES_PASSWORD` | required | Compose only: the bundled Postgres's password, letters and digits |
 | `INSTALL_LOCAL_MODELS` | `false` | Docker build argument for CPU-only [PyTorch](GLOSSARY.md#pytorch) and the local search models. With Compose, set it in `.env` so rebuilds keep them |
-| `NEWSROOM_NAME`, `ARCHIVE_START_DATE`, `DEFAULT_REGION` | The Philadelphia Inquirer's ([why that matters](#steps-for-one-server)) | Your newsroom's name, earliest article date and region; the same `NEWSROOM_NAME` on the server and the indexing computer |
+| `NEWSROOM_NAME` | required ([why](#steps-for-one-server)) | Your newsroom's name; the same on the server and the indexing computer |
+| `ARCHIVE_START_DATE`, `DEFAULT_REGION` | empty | Your earliest article date and region. Empty: Dewey states no start date and assumes no region |
 | `DATABASE_URL`, `DEWEY_STACK`, API keys | [STACKS.md](STACKS.md#configuring-by-hand) | The same embedding settings on the server and the indexer |
 
 Server options (`python app/mcp_server.py --help`): `--http` (Streamable HTTP, not [stdio](GLOSSARY.md#stdio)), `--host` (default `127.0.0.1`; `0.0.0.0` in the Docker image), `--port` (default 8765), `--public-url` and `--no-auth` (loopback testing only; [details](MCP.md#before-you-start-http)).
@@ -856,7 +856,8 @@ For `401`, `421 Invalid Host header` or a chat app in Docker that can't connect,
 | `Refusing to start: GRADIO_SERVER_NAME=0.0.0.0 lets other machines reach the demo page` | The demo has no login: unset `GRADIO_SERVER_NAME`, or see [the demo page](#the-demo-page) |
 | Status 400, "Dewey's demo page has no login, so it only answers requests addressed to localhost..." | Open `http://127.0.0.1:7860/`, not another name such as the Compose log's `http://0.0.0.0:7860`. Behind a sign-in proxy, set `DEWEY_DEMO_BEHIND_AUTH_PROXY=true` |
 | Answers from the `ollama` service ignore the question | Ollama still reads only 4,096 tokens: add `compose.override.yaml` ([steps](#steps-for-one-server)), then check CONTEXT in `docker compose exec ollama ollama ps` |
-| Answers call your own articles another outlet's, or name The Philadelphia Inquirer | `NEWSROOM_NAME` is unset, or differs between the server and the indexing computer: set it the same on both, then index again |
+| Answers call your own articles another outlet's, or name The Philadelphia Inquirer | `NEWSROOM_NAME` differs between the server and the indexing computer, or the articles were indexed by an earlier version with no name set: set it the same on both, then index again |
+| The server stops with `NEWSROOM_NAME is not set` | Add `NEWSROOM_NAME` to the server's settings (`.env`, `fly.toml` or `render.yaml`) and start it again |
 | `Embedding settings don't match this database` | Use the same `DEWEY_STACK`, `EMBEDDING_PROVIDER`, `EMBED_MODEL` and `EMBED_DIM` for the server and the indexer ([STACKS.md](STACKS.md#indexes-are-tied-to-one-embedding-model)) |
 | Render deploy never becomes healthy | `--port` in `dockerCommand` doesn't match Render's `PORT` |
 | Fly health checks fail | `internal_port` and the check's `port` must both be 8765, the image's port |

@@ -161,13 +161,18 @@ def heading(text: str) -> None:
 def ask(prompt: str, default: str = "", required: bool = False) -> str:
     suffix = paint(f" [{default}]", DIM) if default else ""
     while True:
+        ended = False
         try:
             value = input(f"{prompt}{suffix}" + paint(":", BRAND) + " ").strip()
         except EOFError:
-            value = ""
+            value, ended = "", True
         value = value or default
         if value or not required:
             return value
+        if ended:
+            # No more input will come (piped or closed stdin): asking again would loop forever.
+            say("\n  This one is required, and the input ended. Nothing was written.")
+            sys.exit(1)
         say("  This one is required.")
 
 
@@ -339,15 +344,18 @@ def ask_stack(cur: dict) -> str:
 
 def ask_newsroom(cur: dict) -> dict:
     heading("Newsroom details (used in Dewey's prompts)")
-    say("Leave blank to keep Dewey's original defaults (The Philadelphia Inquirer).")
+    say("Dewey labels your own articles with your newsroom's name and tells AI tools whose archive")
+    say("this is, so the name is required. The date and region can be left blank: Dewey then states")
+    say("no start date and assumes no region.")
     out = {
-        "NEWSROOM_NAME": ask("Newsroom name, as it should appear in prompts", cur.get("NEWSROOM_NAME", "")),
+        "NEWSROOM_NAME": ask("Newsroom name, as it should appear in prompts",
+                             cur.get("NEWSROOM_NAME", "").strip(), required=True),
         "ARCHIVE_START_DATE": ask("Earliest article date in your archive (e.g. January 1, 2015)",
                                   cur.get("ARCHIVE_START_DATE", "")),
     }
     say("Should Dewey assume questions are about a region when none is named?")
     saved = cur.get("DEFAULT_REGION")
-    region = ask("Region (e.g. 'the Greater Philadelphia Region'), or 'none' for a national outlet",
+    region = ask("Region (e.g. 'the Tri-County Area'), or 'none' for a national outlet",
                  "none" if saved == "" else (saved or ""))
     if region.lower() == "none":
         out["DEFAULT_REGION"] = ""  # explicit empty value disables the regional assumption

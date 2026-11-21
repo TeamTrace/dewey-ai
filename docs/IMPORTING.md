@@ -465,12 +465,20 @@ articles in [Postgres](GLOSSARY.md#postgres).
 | `url` | Yes | The public address. Answers cite it, so it must work. |
 | `authors` | Yes | Bylines, one name per string: `["Jane Doe"]`. May be empty (`[]`) on Postgres, but author filters won't find those; `azure` skips them. |
 | `publish_date` | Yes | An [ISO 8601](GLOSSARY.md#iso-8601-date) date and time: `2024-05-01T13:00:00Z` is 1 p.m. UTC on May 1, 2024. |
-| `publisher` | No | Postgres only: the [publisher](GLOSSARY.md#publisher). Omit it for your own articles (the indexer uses `NEWSROOM_NAME`); set it for articles from elsewhere. |
+| `publisher` | No | Postgres only: the [publisher](GLOSSARY.md#publisher). Omit it for your own articles (the indexer uses `NEWSROOM_NAME`); set it for articles from elsewhere, by hand or with an importer's `--publisher`. |
 
-> [!WARNING]
-> Articles without a `publisher` (everything the importers write) are labelled as The Philadelphia
-> Inquirer's, Dewey's original default, unless `NEWSROOM_NAME` is set in `.env`. Set it before you index
-> (step 1 of [Index your articles](#index-your-articles)).
+> [!IMPORTANT]
+> Articles without a `publisher` are labelled with `NEWSROOM_NAME` when you index, so answers present
+> them as your own reporting. For a source that isn't yours (a partner's feed, a wire service), add
+> `--publisher` to the import command, with the outlet's name in quotes:
+>
+> ```bash
+> python app/import_archive.py feed --url https://PARTNER.EXAMPLE/feed/ --publisher "PARTNER NAME"
+> ```
+>
+> The indexer stops with an error if an article has no `publisher` and `NEWSROOM_NAME` isn't set
+> (step 1 of [Index your articles](#index-your-articles)). Earlier versions labelled such articles as
+> The Philadelphia Inquirer's; if you indexed that way, set the name and index again.
 
 <details><summary>Making files yourself</summary>
 
@@ -492,9 +500,10 @@ These steps are for every setup except Azure: there, run `python app/setup.py` i
 ([AZURE.md](AZURE.md#build-the-search-index)). On a server with [Docker Compose](GLOSSARY.md#docker-compose),
 the indexer runs in a container ([DEPLOYMENT.md](DEPLOYMENT.md#a-one-server-with-docker-compose)).
 
-> [!WARNING]
-> If `NEWSROOM_NAME` isn't set in `.env`, search results name The Philadelphia Inquirer as the publisher
-> of your own stories. Check it first (step 1). If you already indexed that way, set it and index again.
+> [!IMPORTANT]
+> The indexer labels your own stories with `NEWSROOM_NAME` from `.env`, and stops with an error if it
+> isn't set. Check it first (step 1). Earlier versions used The Philadelphia Inquirer's name instead:
+> if you indexed that way, set the name and index again.
 
 1. **Check that `.env` names your newsroom.** This prints the setting, if it's there:
 

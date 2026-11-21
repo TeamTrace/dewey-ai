@@ -26,6 +26,8 @@ def server_env(fake_stack: bool = True, **overrides: Optional[str]) -> Dict[str,
     if fake_stack:
         env["DEWEY_MCP_TEST_STACK"] = "1"
     env["DEWEY_MCP_TOKEN"] = ""
+    env["NEWSROOM_NAME"] = "The Example Times"  # required: the server has no default newsroom
+    env["ARCHIVE_START_DATE"] = env["DEFAULT_REGION"] = ""
     env["PYTHONUNBUFFERED"] = "1"
     for key, value in overrides.items():
         if value is None:

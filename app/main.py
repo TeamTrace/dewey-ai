@@ -414,13 +414,13 @@ def main() -> int:
         print(f"Dewey: {line}")
 
     from dewey import Dewey
-    from models import NewsroomConfig
+    from models import NewsroomConfig, NewsroomConfigError
     from providers import StackConfigError, build_stack
 
     # DEWEY_STACK=azure (default), anthropic or open; see providers/__init__.py
     try:
         llm, retriever = build_stack(NewsroomConfig.from_env())
-    except StackConfigError as e:
+    except (StackConfigError, NewsroomConfigError) as e:
         print(f"Dewey: {e}", file=sys.stderr)
         return 1
     demo = build_ui(Dewey(llm, retriever))

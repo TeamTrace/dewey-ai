@@ -213,10 +213,10 @@ A plain-text data format: named values in `{ }`, lists in `[ ]`, no comments and
 
 The organization that produced an article: your newsroom or another outlet.
 
-**In Dewey:** an optional `publisher` field, not stored on Azure. Importers never fill it, so add it to other outlets' stories; the rest get `NEWSROOM_NAME` when you index.
+**In Dewey:** an optional `publisher` field, not stored on Azure. Importers fill it only when you pass `--publisher`, so use that for other outlets' stories; the rest get `NEWSROOM_NAME` when you index.
 
-> [!WARNING]
-> If `NEWSROOM_NAME` isn't set, Dewey credits those articles to "The Philadelphia Inquirer", the newsroom it was first built for. Set your newsroom's name in the setup wizard, then index again.
+> [!IMPORTANT]
+> `NEWSROOM_NAME` is required: without it the indexer, the MCP server and the demo page stop with an error. Earlier versions credited those articles to "The Philadelphia Inquirer", the newsroom Dewey was first built for. If you indexed that way, set your newsroom's name in the setup wizard, then index again.
 
 **More:** [IMPORTING.md: Index your articles](IMPORTING.md#index-your-articles)
 

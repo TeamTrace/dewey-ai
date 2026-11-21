@@ -27,6 +27,9 @@ services:
     envVars:
       - key: DEWEY_STACK
         value: anthropic
+      # Required: the server won't start without it. Use the same name as the .env you index with.
+      - key: NEWSROOM_NAME
+        value: Your Newsroom
       # --- secrets: values are entered in the Dashboard ---
       - key: DEWEY_MCP_TOKEN     # 32+ random characters; MCP clients send it as a bearer token
         sync: false

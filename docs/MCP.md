@@ -61,10 +61,11 @@ model server (Ollama, for example) needn't be running for searches.
 - **Each `ask_archive` call starts fresh,** so the question must carry its own context. Dewey may ask
   back ("which time period?"); the agent can then ask more precisely.
 
-> [!WARNING]
-> **Set `NEWSROOM_NAME` and `ARCHIVE_START_DATE` first.** Without them, the server tells every AI tool
-> that it searches The Philadelphia Inquirer's archive, from January 2, 1978 on. Articles indexed
-> without a `publisher` are labelled as the Inquirer's too. Set both in the wizard's "Newsroom details"
+> [!IMPORTANT]
+> **Set `NEWSROOM_NAME` first: the server won't start without it.** It tells every AI tool whose
+> archive it searches, and articles indexed without a `publisher` are labelled with it. With
+> `ARCHIVE_START_DATE` set, the server also says how far back the archive goes; without it, it gives
+> no date. Set both in the wizard's "Newsroom details"
 > step ([how](INSTALL.md#change-your-settings)). Then restart the server or AI tool and, on the
 > Postgres setups, [index your articles](IMPORTING.md#index-your-articles) again.
 

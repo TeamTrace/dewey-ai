@@ -353,6 +353,7 @@ SAME_BYLINE_MIN = 3  # this many articles sharing the only byline seen is worth 
 @dataclass
 class ImportReport:
     source: str
+    publisher: Optional[str] = None
     written: int = 0
     duplicates: int = 0
     skipped: Counter = field(default_factory=Counter)
@@ -381,6 +382,8 @@ class ImportReport:
 
     def summary(self) -> str:
         lines = [f"Imported {self.written} article(s) from {self.source}."]
+        if self.publisher:
+            lines.append(f"  Publisher on every article: {self.publisher}")
         if self.first_date:
             lines.append(f"  Publish dates: {self.first_date[:10]} to {self.last_date[:10]}")
         if self.bylined >= SAME_BYLINE_MIN and not self.bylines_vary:
@@ -443,7 +446,11 @@ class ArticleWriter:
     never leaves a half-replaced archive.
     """
 
-    def __init__(self, out_dir: Path, prefix: str, report: ImportReport, limit: Optional[int] = None):
+    def __init__(self, out_dir: Path, prefix: str, report: ImportReport, limit: Optional[int] = None,
+                 publisher: Optional[str] = None):
+        # publisher: named on every article written (--publisher), for a source that isn't the
+        # newsroom's own. Without it articles carry no publisher and the indexer uses NEWSROOM_NAME.
+        self.publisher = publisher
         self.out_dir = Path(out_dir)
         self.prefix = re.sub(r"[^A-Za-z0-9_-]+", "-", prefix).strip("-") or "import"
         self.report = report
@@ -474,6 +481,8 @@ class ArticleWriter:
         if article["id"] in self.seen_ids or url_key in self.seen_urls:
             self.report.duplicates += 1
             return
+        if self.publisher:
+            article["publisher"] = self.publisher
         self.seen_ids.add(article["id"])
         self.seen_urls.add(url_key)
         self.report.note_byline(article["authors"])

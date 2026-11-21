@@ -821,7 +821,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 9. **Azure.** Its 11 questions are explained in [AZURE.md](AZURE.md#with-the-setup-wizard), which also covers importing ([AZURE.md](AZURE.md#prepare-your-articles)).
 
 > [!WARNING]
-> **Don't leave the newsroom details blank.** Blank answers keep the defaults of The Philadelphia Inquirer: prompts assume an archive from January 2, 1978, and the Greater Philadelphia Region. Articles indexed without a [publisher](GLOSSARY.md#publisher) field are labelled as the Inquirer's, and your AI tool is told it searches that archive. If this happened, fill in the name and index again (indexing replaces the label).
+> **The newsroom name is required.** The wizard asks until you type one: articles indexed without a [publisher](GLOSSARY.md#publisher) field are labelled with it, and your AI tool is told whose archive it searches. A blank date means Dewey states no start date; a blank region means it assumes none. Earlier versions filled blanks with The Philadelphia Inquirer's details: if your articles were indexed that way, fill in the name and index again (indexing replaces the label).
 
 10. **Newsroom details (used in Dewey's prompts).** Type your newsroom's name, the earliest article date in your archive, and your region (`none` for a national outlet).
 

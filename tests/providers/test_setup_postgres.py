@@ -11,8 +11,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "app"))
 import contextlib  # noqa: E402
 import io  # noqa: E402
 import json  # noqa: E402
+import os  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
+from unittest import mock  # noqa: E402
 
 import import_archive  # noqa: E402
 import setup_postgres  # noqa: E402
@@ -39,6 +41,10 @@ class ConflictingIdTests(unittest.TestCase):
         self.dir = pathlib.Path(tmp.name)
         self.data = self.dir / "data"
         self.data.mkdir()
+        # These articles name no publisher, so loading them needs the newsroom's name.
+        env = mock.patch.dict(os.environ, {"NEWSROOM_NAME": "The Example Times"})
+        env.start()
+        self.addCleanup(env.stop)
 
     def load(self):
         with contextlib.redirect_stdout(io.StringIO()):

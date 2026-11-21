@@ -27,26 +27,38 @@ class AzureSearchConfig:
     key: str
 
 
+class NewsroomConfigError(ValueError):
+    """NEWSROOM_NAME is unset or blank. The message is written for the person running Dewey."""
+
+
 @dataclass
 class NewsroomConfig:
     """
-    Newsroom-specific prompt values. Defaults reproduce the original
-    Philadelphia Inquirer deployment so existing setups behave the same.
+    Newsroom-specific values for prompts, tool descriptions and article labels.
 
-    **publisher**: whose articles the archive contains.
-    **archive_start**: human-readable earliest date in the archive.
+    **publisher**: the newsroom whose archive this is. Required: it has no default, because a
+        default would label one newsroom's articles as another's (Dewey used to fall back to
+        The Philadelphia Inquirer, the newsroom it was first built for).
+    **archive_start**: human-readable earliest date in the archive. Empty: no date is claimed.
     **default_region**: region to assume when a question names none.
         Empty string disables the assumption (e.g. for a national outlet).
     """
-    publisher: str = "The Philadelphia Inquirer"
-    archive_start: str = "January 2, 1978"
-    default_region: str = "the Greater Philadelphia Region"
+    publisher: str
+    archive_start: str = ""
+    default_region: str = ""
 
     @classmethod
     def from_env(cls) -> "NewsroomConfig":
-        defaults = cls()
+        """Read NEWSROOM_NAME, ARCHIVE_START_DATE and DEFAULT_REGION. Blank counts as unset."""
+        publisher = (os.getenv("NEWSROOM_NAME") or "").strip()
+        if not publisher:
+            raise NewsroomConfigError(
+                "NEWSROOM_NAME is not set. Dewey labels your own articles with it and names it to AI "
+                "tools, so it has no default. Add it to .env, for example NEWSROOM_NAME='Your Newsroom', "
+                "or run python install.py and fill in the newsroom name."
+            )
         return cls(
-            publisher=os.getenv("NEWSROOM_NAME", defaults.publisher),
-            archive_start=os.getenv("ARCHIVE_START_DATE", defaults.archive_start),
-            default_region=os.getenv("DEFAULT_REGION", defaults.default_region),
+            publisher=publisher,
+            archive_start=(os.getenv("ARCHIVE_START_DATE") or "").strip(),
+            default_region=(os.getenv("DEFAULT_REGION") or "").strip(),
         )

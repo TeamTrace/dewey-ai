@@ -89,6 +89,19 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(tools["search_archive"].inputSchema["required"], ["question"])
         self.assertEqual(set(tools["ask_archive"].inputSchema["properties"]), {"question"})
 
+    def test_instructions_name_the_configured_newsroom_and_claim_no_date_that_was_not_set(self):
+        # They used to say "The Philadelphia Inquirer ... (articles from January 2, 1978 on)"
+        # whenever the settings were missing (#14).
+        instructions = make_server().instructions
+        self.assertIn("Dewey searches the news archive of The Example Times. Use search_archive", instructions)
+        dated = create_server(FakeLLM(), FakeRetriever(),
+                              NewsroomConfig(publisher="The Example Times", archive_start="June 1, 2016"))
+        self.assertIn("of The Example Times (articles from June 1, 2016 on). Use", dated.instructions)
+        tools = asyncio.run(make_server().list_tools())
+        for text in [instructions, dated.instructions] + [t.description for t in tools]:
+            for word in ("Philadelphia", "Inquirer", "1978"):
+                self.assertNotIn(word, text)
+
     def test_search_archive_filters_and_numbers_sources(self):
         result, out, err = self.call(
             make_server(), "search_archive", {"question": "budget", "start_date": "2000-01-01", "authors": ["Jane Doe"]}
