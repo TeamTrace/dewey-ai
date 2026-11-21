@@ -524,7 +524,7 @@ Windows's command-line shell; its prompt starts with `PS`. Windows includes Wind
 
 The programming language Dewey is written in.
 
-**In Dewey:** 3.11, 3.12 and 3.13 work; 3.14 is untested, and 3.15 can't install Dewey. A Mac's `python3` may be Apple's 3.9, too old, so the guides type `python3.13`.
+**In Dewey:** 3.11, 3.12 and 3.13 work; 3.14 is untested, and 3.15 can't install Dewey. A Mac's `python3` may be Apple's 3.9, too old, so the guides type `python3.13`. The [setup wizard](#setup-wizard) stops on a Python it can't use and says how to switch; on 3.14 it says that version isn't tested, and carries on.
 
 **More:** INSTALL.md for your [Mac](INSTALL.md#get-your-mac-ready), [Windows PC](INSTALL.md#get-your-windows-pc-ready) or [Linux computer](INSTALL.md#get-your-linux-computer-ready)
 

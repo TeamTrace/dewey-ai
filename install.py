@@ -45,7 +45,13 @@ from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
-MIN_PYTHON = (3, 11)  # README badge and docs/INSTALL.md: Python 3.11-3.13
+MIN_PYTHON = (3, 11)      # the oldest Python every pin in requirements.txt accepts
+TESTED_PYTHON = (3, 13)   # the newest Python CI runs; the guides and LINKS["python"] use it
+TOO_NEW_PYTHON = (3, 15)  # the first Python the pins can't be installed on (voyageai==0.6.0 needs < 3.15)
+# Every message about Python versions takes its numbers from these three. Versions between
+# TESTED_PYTHON and TOO_NEW_PYTHON (3.14 today) get a note, not a refusal: the pins accept
+# them, but nothing here tests them. tests/install/test_python_check.py ties the three to
+# requirements.txt, the CI matrix, the README and docs/INSTALL.md.
 
 # Where users get each account or tool. Sources: Anthropic's embeddings guide
 # (Voyage keys come from MongoDB Atlas), Ollama's README, pgvector's README.
@@ -327,6 +333,255 @@ def write_env(content: str) -> None:
     except OSError:
         pass
     say(f"  Wrote {ENV_PATH}")
+
+
+# ------------------------------------------ Python version and virtual environment
+#
+# This runs on Python 3.9 (macOS's own /usr/bin/python3): the version check has to be able to
+# say "too old" there. So the whole file must keep loading on 3.9: no newer syntax, no `X | Y`
+# in annotations, no top-level import that 3.9 lacks (tests/install/test_python_check.py).
+
+@dataclass
+class PythonSituation:
+    """Where the Python running this wizard lives, and whether the Dewey folder has a virtual
+    environment. Kept apart from the wording, so tests can describe any computer."""
+    system: str               # "mac", "linux" or "windows": whose commands to print
+    root: str                 # the Dewey folder
+    in_root: bool             # the terminal's current folder is the Dewey folder
+    venv: str                 # the virtual environment this Python belongs to; "" when none
+    in_dewey_venv: bool       # that environment is the Dewey folder's .venv
+    dewey_venv_exists: bool   # the Dewey folder has a .venv with a Python in it
+    dewey_venv_broken: bool = False  # it has a .venv folder that is not a working environment
+
+    @property
+    def dewey_venv_is_off(self) -> bool:
+        """The Dewey folder has a working .venv and this Python is not in it: it only has to be
+        turned on. True as well when another project's environment is on in this terminal."""
+        return self.dewey_venv_exists and not self.in_dewey_venv
+
+
+def python_verdict(version=None) -> str:
+    """One of "ok", "old", "new", "untested" for a Python version (this one when none is given)."""
+    version = tuple((version or sys.version_info)[:2])
+    if version < MIN_PYTHON:
+        return "old"
+    if version >= TOO_NEW_PYTHON:
+        return "new"
+    return "untested" if version > TESTED_PYTHON else "ok"
+
+
+def in_virtualenv() -> bool:
+    """True when this Python belongs to a virtual environment: any one, not only Dewey's .venv."""
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+
+def venv_python(windows: Optional[bool] = None) -> Path:
+    """Where the Python of the Dewey folder's .venv is, whether or not it exists. Not resolved:
+    it is a link to the Python the environment was made with."""
+    windows = os.name == "nt" if windows is None else windows
+    return ROOT / ".venv" / ("Scripts/python.exe" if windows else "bin/python")
+
+
+def _is_there(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def python_situation() -> PythonSituation:
+    """This computer's PythonSituation."""
+    venv = Path(sys.prefix).resolve() if in_virtualenv() else None
+    dewey_venv = ROOT / ".venv"
+    in_dewey_venv = venv is not None and venv == dewey_venv.resolve()
+    try:
+        in_root = Path.cwd().resolve() == ROOT
+    except OSError:  # the terminal's folder no longer exists
+        in_root = False
+    # pyvenv.cfg marks a virtual environment. Without its Python (a leftover folder, or the Python
+    # it was made with has been uninstalled) "turn it on" would lead nowhere, and it has to be
+    # made again with --clear: without that, venv keeps the dead links already in the folder.
+    works = in_dewey_venv or (_is_there(dewey_venv / "pyvenv.cfg") and _is_there(venv_python()))
+    return PythonSituation(
+        system="windows" if os.name == "nt" else ("mac" if sys.platform == "darwin" else "linux"),
+        root=str(ROOT), in_root=in_root, venv=str(venv) if venv else "", in_dewey_venv=in_dewey_venv,
+        dewey_venv_exists=works, dewey_venv_broken=not works and os.path.lexists(str(dewey_venv)))
+
+
+def _dotted(version) -> str:
+    return "%d.%d" % tuple(version[:2])
+
+
+def _typed(system: str, path: str) -> str:
+    """A path as it is typed in that system's shell: zsh or bash, or PowerShell on Windows."""
+    if system != "windows":
+        return shlex.quote(path)
+    return path if re.fullmatch(r"[\w:\\/.~-]+", path) else "'" + path.replace("'", "''") + "'"
+
+
+def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_first: bool = False) -> List[str]:
+    """The lines for "make or turn on the virtual environment, then run this wizard again", for
+    the computer `where` describes and the Python `version` running the wizard (this computer
+    and this Python when not given).
+
+    When the Dewey folder has a working .venv and this Python is not in it: turn that on, and
+    make nothing again (not even when another project's environment is the one turned on).
+    Otherwise, outside any environment: make one, with --clear if a .venv folder is there but
+    is not a working environment. Inside one whose Python isn't one Dewey is tested with: make
+    it again, at its own path (inside one that is fine there is nothing to make or turn on).
+    `cd` to the Dewey folder comes first when the terminal is somewhere else, or when `cd_first`
+    says the commands may be typed later, in another window: they are relative, and
+    `--clear .venv` in the wrong folder would empty another project's environment.
+
+    Lines that start with two spaces are commands, one per line, each under a line that says
+    what it does. The other lines do no harm if the whole block is pasted: they have no quotes,
+    ; # or other characters a shell acts on, and none starts with a word that is also a command
+    (a Mac's zsh runs `Make` as make). Only this system's commands are given (PowerShell's on
+    Windows).
+    """
+    where = where or python_situation()
+    windows = where.system == "windows"
+    running = tuple((version or sys.version_info)[:2])
+    # Name the Python that is running when Dewey is tested with it: it is on this computer, and
+    # on Ubuntu 24.04 it is 3.12, where python3.13 may not exist. Otherwise name the newest
+    # tested one. Which other Pythons are installed is not looked up.
+    tested = python_verdict(running) == "ok"
+    use = _dotted(running if tested else TESTED_PYTHON)
+    python = f"py -{use}" if windows else f"python{use}"
+    # An environment in another folder is made again only when the Dewey folder has none of its own.
+    elsewhere = bool(where.venv) and not where.in_dewey_venv and not where.dewey_venv_is_off
+    if not elsewhere:
+        folder = ".venv"
+        activate = ".venv\\Scripts\\Activate.ps1" if windows else "source .venv/bin/activate"
+    elif windows:
+        folder = _typed("windows", where.venv)
+        script = _typed("windows", where.venv.rstrip("\\/") + "\\Scripts\\Activate.ps1")
+        activate = ("& " if script.startswith("'") else "") + script  # PowerShell runs a quoted path with &
+    else:
+        folder = shlex.quote(where.venv)
+        activate = "source " + shlex.quote(where.venv.rstrip("/") + "/bin/activate")
+
+    lines: List[str] = []
+    if cd_first or not where.in_root:
+        lines += ["First, go to the Dewey folder:", "  cd " + _typed(where.system, where.root)]
+    if where.dewey_venv_is_off:
+        lines += ["Turn the virtual environment on:", f"  {activate}"]
+    elif not (where.venv and tested):
+        if where.system == "linux" and not tested:
+            lines.append(f"Any of Python {_dotted(MIN_PYTHON)} to {_dotted(TESTED_PYTHON)} works: type its number "
+                         f"in place of {use} in the next command.")
+        if not where.venv and not where.dewey_venv_broken:
+            lines += [f"Create a virtual environment for Dewey, the .venv folder, with Python {use}:",
+                      f"  {python} -m venv .venv"]
+        else:
+            what, inside = ("that", "its folder") if elsewhere else ("the", ".venv")
+            lines += [f"Create {what} virtual environment again with Python {use}. "
+                      f"This deletes what is in {inside} first:",
+                      f"  {python} -m venv --clear {folder}"]
+        lines += ["Turn it on:", f"  {activate}"]
+        if where.system == "linux":  # a new environment's pip there is older than the guide asks for
+            lines.append("Update pip before the last command: step 4 of Create a virtual environment in "
+                         "docs/INSTALL.md.")
+    return lines + ["Start this wizard again:", "  python install.py"]
+
+
+def python_reason(verdict: str, version) -> List[str]:
+    """The first lines of the version check: what Dewey needs, and what this Python is."""
+    this = ".".join(str(n) for n in tuple(version)[:3])
+    span = f"{_dotted(MIN_PYTHON)} to {_dotted(TESTED_PYTHON)}"
+    if verdict == "old":
+        return [f"Dewey needs Python {span}; this is {this}, which is too old."]
+    if verdict == "new":
+        return [f"Dewey needs Python {span}; this is {this}, which is too new.",
+                f"Some of the packages Dewey installs can't be installed on Python {_dotted(version)} yet."]
+    return [f"Dewey is tested with Python {span}; this is {this}.",
+            f"On Python {_dotted(version)}, some packages may have to be built on your computer, which needs a "
+            "C compiler.",
+            f"Python {_dotted(TESTED_PYTHON)} is the safest choice. To switch, press Control+C and see "
+            "Troubleshooting in docs/INSTALL.md."]
+
+
+def switch_python_lines(where: PythonSituation, version=None) -> List[str]:
+    """What to do about a Python that can't run Dewey, by where that Python lives. The commands
+    come from environment_steps(), and the lines follow its conventions."""
+    best = _dotted(TESTED_PYTHON)
+    windows = where.system == "windows"
+    if where.dewey_venv_is_off:
+        # Checked first, whatever is wrong with the version: most likely the environment just
+        # isn't turned on, and nobody whose .venv is fine should be told to delete it (or to
+        # empty another project's environment that happens to be on). If the .venv's own Python
+        # is wrong too, the next run is inside it and says so.
+        return (["This is not the Python in Dewey's virtual environment (the .venv folder): the environment is",
+                 "not turned on in this terminal window. "
+                 + ("In PowerShell, run these one at a time:" if windows else "Run these one at a time:")]
+                + environment_steps(where, version)
+                + ["If the wizard stops again, it will show how to make the environment again."])
+    lines: List[str] = []
+    if where.in_dewey_venv:
+        lines += ["This Python is the one in Dewey's virtual environment (the .venv folder), so installing another",
+                  "Python is not enough: the environment has to be made again with it.", ""]
+    elif where.venv:
+        lines += ["This Python belongs to a virtual environment in",
+                  f"  {where.venv}",
+                  "so installing another Python is not enough: that environment has to be made again with it.", ""]
+    elif where.dewey_venv_broken:
+        lines += ["The Dewey folder has a .venv folder, but it is not a working virtual environment,",
+                  "so it has to be made again.", ""]
+    if where.system == "linux":
+        lines += [f"If no Python from {_dotted(MIN_PYTHON)} to {best} is installed yet, install one first with your "
+                  "package manager:",
+                  "docs/INSTALL.md has the commands (Get your Linux computer ready, step 3)."]
+    else:
+        installer = "Windows installer (64-bit)" if windows else "macOS installer"
+        lines += [f"If Python {best} is not installed yet, install it first, with the {installer} from",
+                  f"  {LINKS['python']}",
+                  "Not the main Download button on python.org, which may give a newer Python that Dewey cannot use."]
+    lines += ["", "Then, in PowerShell, run these one at a time:" if windows else "Then run these one at a time:"]
+    # cd_first: after installing Python, people often carry on in a new window, which starts elsewhere.
+    lines += environment_steps(where, version, cd_first=True)
+    lines.append("For more help: Recreate the virtual environment, under Troubleshooting in docs/INSTALL.md."
+                 if where.venv or where.dewey_venv_broken
+                 else "For more help: Create a virtual environment, in docs/INSTALL.md.")
+    return lines
+
+
+def python_check_lines(version, where: PythonSituation) -> List[str]:
+    """Everything the version check prints about a Python that Dewey isn't tested with."""
+    verdict = python_verdict(version)
+    if verdict == "ok":
+        return []
+    lines = python_reason(verdict, version)
+    if verdict != "untested":
+        return lines + [""] + switch_python_lines(where, version)
+    if where.dewey_venv_is_off:
+        lines += ["",
+                  "This is also not the Python in Dewey's virtual environment (the .venv folder): the environment is",
+                  "not turned on in this terminal window. To use it, press Control+C, then "
+                  + ("in PowerShell " if where.system == "windows" else "") + "run these one at a time:"]
+        lines += environment_steps(where, version)
+        lines.append(f"Otherwise this wizard carries on with Python {_dotted(version)}.")
+    return lines
+
+
+def say_lines(lines) -> None:
+    """Print lines built by the functions above. Commands, links and folders stand out."""
+    for line in lines:
+        say(paint(line, BRAND) if line.startswith("  ") else line)
+
+
+def check_python(version=None, where: Optional[PythonSituation] = None) -> bool:
+    """Before the first question, say what is wrong with this Python, if anything. False means
+    stop: Dewey's packages can't be installed on it (too old, or too new for the pinned ones).
+
+    A Python newer than CI tests, but which the pins accept, gets a note and carries on.
+    """
+    version = tuple(version or sys.version_info)
+    verdict = python_verdict(version)
+    if verdict == "ok":
+        return True
+    say()
+    say_lines(python_check_lines(version, where or python_situation()))
+    return verdict == "untested"
 
 
 # ---------------------------------------------------------------- questions
@@ -861,12 +1116,17 @@ def needs_local_models(values: dict) -> bool:
 
 def install_dependencies(values: dict) -> None:
     heading("Install Python dependencies")
-    in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    if not in_venv:
-        say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
-        say("  python3.13 -m venv .venv && source .venv/bin/activate")
-        say("  (Windows: py -3.13 -m venv .venv, then .venv\\Scripts\\Activate.ps1)")
-        say("then re-run: python install.py")
+    if not in_virtualenv():
+        where = python_situation()
+        if where.dewey_venv_exists:
+            say("You're not in a virtual environment. The Dewey folder has one, the .venv folder, but it is")
+            say("not turned on in this terminal window. To turn it on and run this wizard in it:")
+        elif where.dewey_venv_broken:
+            say("You're not in a virtual environment. The Dewey folder has a .venv folder, but it is")
+            say("not a working virtual environment. To make it again and run this wizard in it:")
+        else:
+            say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
+        say_lines(environment_steps(where))
         if not ask_yes("Install into the current Python anyway?", default=False):
             return
     pip = [sys.executable, "-m", "pip", "install"]
@@ -1971,13 +2231,7 @@ def main() -> int:
     say("  " + paint("─" * 44, DEEP, DIM))
     say("This walks you through choosing a stack, getting any accounts and keys it needs,")
     say("and writing your .env file. Secrets are typed hidden and stored only in .env.")
-    if sys.version_info < MIN_PYTHON:
-        say(f"\nDewey needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} to 3.13; this is {sys.version.split()[0]}.")
-        say("On a Mac or Windows, install Python 3.13 from")
-        say("  " + paint(LINKS["python"], BRAND, UNDERLINE))
-        say("On Linux, use your package manager (Python 3.11, 3.12 and 3.13 all work).")
-        say("A .venv folder made with this older Python won't work: delete it, make it again")
-        say("with the new Python, then re-run python install.py. docs/INSTALL.md shows each step.")
+    if not check_python():
         return 1
 
     current = read_env(ENV_PATH)
