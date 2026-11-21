@@ -827,7 +827,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 11. **Connect AI tools (MCP).** The wizard saves a secret [bearer token](GLOSSARY.md#bearer-token) for Dewey's [MCP server](GLOSSARY.md#mcp-server) in `.env`, without showing it; a re-run asks `Keep the existing MCP token? (Y/n)`: press Enter. Only AI tools that connect over HTTP use it ([MCP.md](MCP.md#before-you-start-http)).
 
-12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs. On Claude with an `ant auth login` sign-in, `Dewey could not confirm a Claude credential` means the sign-in looks signed out: run the `ant auth login` command printed under it. The wizard carries on meanwhile ([STACKS.md](STACKS.md#claude-anthropic-api)).
+12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs. On Claude with an `ant auth login` sign-in, `Dewey could not confirm a Claude credential` usually means the sign-in looks signed out: follow the lines printed under it (most often an `ant auth login` command). The wizard carries on meanwhile ([STACKS.md](STACKS.md#claude-anthropic-api)).
 
 13. **Write this to .env? (Y/n)** Press Enter. You should see something like:
     ```text

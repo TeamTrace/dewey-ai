@@ -156,9 +156,9 @@ class Scenario(NamedTuple):
     expect: tuple
     profiles: dict = {}
     active: object = None       # what active_config holds: text, bytes, or None for no file
-    env: dict = {}              # variables besides HOME and ANTHROPIC_CONFIG_DIR
+    env: dict = {}              # variables besides HOME and ANTHROPIC_CONFIG_DIR (or that one, to replace its value)
     files: dict = {}            # more credentials files to write: {path: True}
-    home: bool = False          # True: the folder is ~/.config/anthropic and ANTHROPIC_CONFIG_DIR is unset
+    home: bool = False          # True: the folder is ~/.config/anthropic and build() leaves ANTHROPIC_CONFIG_DIR unset
     posix_only: bool = False
     sdk_stops_with: str = ""    # the SDK's constructor raises this instead of one of its own errors
 
@@ -319,6 +319,16 @@ SCENARIOS = [
     Scenario("default location: signed out",
              _unconfirmed("signed_out", "default", "default", "{dir}/credentials/default.json", "default"),
              profiles={"default": SIGNED_OUT}, home=True, posix_only=True),
+
+    # --- ANTHROPIC_CONFIG_DIR is used exactly as given: the SDK neither trims it nor expands ~. In
+    # both rows a healthy sign-in sits where a "tidied" value would point, and must not be found.
+    Scenario("ANTHROPIC_CONFIG_DIR with a space after it is another folder",
+             _missing("no_credential", path="{dir} "),
+             profiles={"default": SIGNED_IN}, env={"ANTHROPIC_CONFIG_DIR": "{dir} "}, posix_only=True),
+    Scenario("ANTHROPIC_CONFIG_DIR beginning with ~ is not the home folder",
+             _missing("no_credential", path="~/.config/anthropic"),
+             profiles={"default": SIGNED_IN}, env={"ANTHROPIC_CONFIG_DIR": "~/.config/anthropic"},
+             home=True, posix_only=True),
 ]
 
 
@@ -357,9 +367,10 @@ def build(testcase, row):
     make_config_dir(testcase, _fill(row.profiles, names), row.active, config_dir)
     for path in _fill(row.files, names):
         write_credentials(config_dir, path=path)
-    env = {"HOME": str(home), **_fill(row.env, names)}
+    env = {"HOME": str(home)}
     if not row.home:
         env["ANTHROPIC_CONFIG_DIR"] = str(config_dir)
+    env.update(_fill(row.env, names))  # last, so that a row can give ANTHROPIC_CONFIG_DIR a value of its own
     path = _fill(row.expect[5], names)
     expect = row.expect[:5] + (os.path.normpath(path) if path else "",) + row.expect[6:]
     return Built(env, expect, str(config_dir), str(home))

@@ -1481,13 +1481,23 @@ def summary_report(values: dict, missing: list, env_file: Optional[dict] = None)
         lines.append("ANTHROPIC_API_KEY comes from this terminal and is not saved in .env. Dewey will use it when "
                      "started from here; a program that starts Dewey by itself (an AI tool, a service) won't have it.")
 
-    # A blank key or token makes Dewey refuse to start whatever else is set. The terminal's value
-    # is the one Dewey sees, even over a key typed here, so the typed key is left out of this view.
+    for name, where in blank_claude_variables(check, env_file):
+        lines.append(check.blank_credential_message([name], where))
+    return lines
+
+
+def blank_claude_variables(check, env_file: Optional[dict] = None) -> list:
+    """(name, where) for ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN when Dewey will find them set
+    but blank; `where` is " in this terminal" or " in .env".
+
+    A blank key or token makes Dewey refuse to start whatever else is set. The terminal's value is
+    the one Dewey sees, even over a key typed here, so the typed key plays no part in this view.
+    `check` is the loaded claude_credentials module; `env_file` is what .env holds or will hold.
+    """
     seen = dict(env_file or {})
     seen.update(os.environ)
-    for name in check.blank_credential_variables(seen):
-        lines.append(check.blank_credential_message([name], " in this terminal" if name in os.environ else " in .env"))
-    return lines
+    return [(name, " in this terminal" if name in os.environ else " in .env")
+            for name in check.blank_credential_variables(seen)]
 
 
 def check_claude(values: dict) -> tuple:
@@ -1497,8 +1507,16 @@ def check_claude(values: dict) -> tuple:
     credential the line says what Dewey's own check found, from files and variables: a sign-in
     never passes in silence, and a problem always carries the word NOT. Nothing here contacts
     Anthropic on the strength of a variable alone. .env has been written by now, so its lines are
-    read back.
+    read back. A blank key or token is reported first, and then nothing else is: Dewey won't
+    start with one, so "ok" for a key or "found" for a sign-in would be the wrong thing to read.
     """
+    check = load_claude_credentials()
+    env_file = read_env(ENV_PATH)
+    blank = blank_claude_variables(check, env_file) if check else []
+    if blank:
+        what = " and ".join(f"{name} is set but empty{where}" for name, where in blank)
+        untested = " The API key was not tested." if values.get("ANTHROPIC_API_KEY") else ""
+        return "Claude credential", f"NOT usable: {what}, so Dewey won't start. See the Summary above.{untested}"
     if values.get("ANTHROPIC_API_KEY"):
         try:
             import anthropic
@@ -1507,12 +1525,18 @@ def check_claude(values: dict) -> tuple:
         except ImportError:
             return "Anthropic API key", "skipped (install requirements first)"
         except Exception as e:
+            if type(e).__name__ == "InvalidURL":
+                # From the HTTP library under Anthropic's: a web address it can't read. Its message
+                # quotes the part it stopped at, which can be part of a password, so it is not shown.
+                return "Anthropic API key", ("NOT checked: a web address set in this terminal is not one Anthropic's "
+                                             "library can read (ANTHROPIC_BASE_URL, or a proxy variable such as "
+                                             "HTTPS_PROXY). Its value is not shown here, because a web address can "
+                                             "contain a password.")
             return "Anthropic API key", f"FAILED: {type(e).__name__}: {e}"
-    check = load_claude_credentials()
     if check is None:
         return "Claude credential", "NOT checked: no API key was given, and this wizard could not look for a saved sign-in"
 
-    credential = check.anthropic_credential_status(claude_environment(values, read_env(ENV_PATH)))
+    credential = check.anthropic_credential_status(claude_environment(values, env_file))
     untested = "not checked (this step tests an API key only)"
     problem = check.credential_problem_lines(credential)
     if credential.state == "usable" and credential.source == "profile":

@@ -22,7 +22,10 @@ JSON-RPC channel). Keep the syntax plain too: no newer than Python 3.9.
 What it looks at: the variables it is given, the active_config file and one settings file
 (configs/NAME.json). It checks that the credentials file (credentials/NAME.json) exists and never
 opens it. It does not check file permissions, follow the SDK's symlink rules or ask Anthropic
-whether a sign-in still works: build_stack() turns the SDK's own refusals into a plain message.
+whether a sign-in still works. build_stack() turns the refusals the SDK makes while the client is
+being built into a plain message. The SDK opens the credentials file only at the first question
+to Claude, so a file it refuses to read (its mode, a symlink) still fails only then, with no
+warning when Dewey starts.
 
 tests/install/test_credential_agreement.py runs every scenario in tests/claude_profiles.py through
 this file and through the real SDK. Run it when the anthropic pin in requirements.txt changes.
@@ -230,6 +233,11 @@ def blank_credential_variables(env: Optional[Mapping[str, str]] = None) -> List[
 #   ANTHROPIC_PROFILE naming a missing sign-in and federation variables set, it shows federation
 #   as active, while the SDK stops. For a signed-out sign-in it prints `(profile "NAME" configured
 #   but not logged in ...)`; for a damaged settings file, `(profile config unreadable: ...)`.
+# - For a sign-in whose settings name a "credentials_path" of their own, with no file there,
+#   `ant auth status` shows credentials/NAME.json as the credentials file and prints the same
+#   "configured but not logged in" line, which ends by saying to run `ant auth login`. That
+#   advice does not help here: a login writes credentials/NAME.json (below), and the SDK reads
+#   the other path.
 # - `ant profile list` and `ant profile activate NAME` exist.
 # Read, not run (signing in and out would change this computer's sign-ins):
 # - https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication : a login that names a
@@ -242,6 +250,8 @@ def blank_credential_variables(env: Optional[Mapping[str, str]] = None) -> List[
 #   one, and it always writes credentials/NAME.json, whatever "credentials_path" says.
 
 _NAME_RULE = "A name can't begin or end with a space, begin with a dot, or contain a slash or backslash."
+_ODD_NAME = ("That name holds a line break or another character that can't be shown as it is (it is written out "
+             "above, as in \\n), so no command with the name in it is shown here.")
 
 
 def _printable(text: str) -> str:
@@ -250,17 +260,40 @@ def _printable(text: str) -> str:
     return text.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
+def _is_control(character: str) -> bool:
+    """True for a line break, and for the other characters a terminal acts on instead of showing."""
+    return character < " " or "\x7f" <= character <= "\x9f" or character in "\u2028\u2029"
+
+
+def _show_controls(text: str) -> str:
+    """A name, a path or a line of the SDK's for one line of a message, with every line break and
+    other control character written out the way JSON writes them (\\n, \\u001b). A sign-in's name
+    can hold them (the SDK takes the whole of the active_config file as the name) and so can a
+    folder's. Printed raw, a line break would cut the line in two and an escape character would be
+    obeyed by the terminal."""
+    return "".join(json.dumps(character)[1:-1] if _is_control(character) else character for character in text)
+
+
+def _fits_a_command(name: str) -> bool:
+    """False for a name that no printed command should hold: one with a line break or another
+    control character in it (the command would not paste as one line), or with bytes that aren't
+    UTF-8 (lone surrogates, to Python), which can only be printed written out, as another name."""
+    return not any(_is_control(character) or 0xD800 <= ord(character) <= 0xDFFF for character in name)
+
+
 def quoted_name(name: str) -> str:
     """A sign-in's name between double quotes for a message, with control characters written out."""
-    return _printable(json.dumps(name, ensure_ascii=False))
+    return _show_controls(_printable(json.dumps(name, ensure_ascii=False)))
 
 
 def ant_status_lines(credential: Optional[ClaudeCredential] = None,
                      to: str = "see what the ant tool finds in this terminal") -> List[str]:
     """The `ant auth status` command and the line before it. When ANTHROPIC_PROFILE chose the
-    sign-in, the command names it: the variable may be set in .env only, which ant doesn't read."""
+    sign-in, the command names it: the variable may be set in .env only, which ant doesn't read.
+    A name the SDK refuses, or one that doesn't fit a command, is never put in it."""
     command = "ant auth status"
-    if credential is not None and credential.selected_by == "ANTHROPIC_PROFILE" and _name_is_valid(credential.profile):
+    if (credential is not None and credential.selected_by == "ANTHROPIC_PROFILE"
+            and _name_is_valid(credential.profile) and _fits_a_command(credential.profile)):
         command += " --profile " + shlex.quote(credential.profile)
     return [f"To {to} (it does not read Dewey's .env), run:", "    " + command]
 
@@ -276,10 +309,24 @@ def _switch_back_lines(credential: ClaudeCredential) -> List[str]:
 
 
 def _problem_lines(credential: ClaudeCredential) -> List[str]:
-    reason, path = credential.reason, credential.path
+    lines = _reason_lines(credential)
+    if lines and not _fits_a_command(credential.profile):
+        lines.insert(1, _ODD_NAME)  # straight after the line that shows the name
+    return lines
+
+
+def _reason_lines(credential: ClaudeCredential) -> List[str]:
+    reason, path = credential.reason, _show_controls(credential.path)
     name = quoted_name(credential.profile)
-    login = f"    ant auth login --profile {shlex.quote(credential.profile)}"
     by_variable = credential.selected_by == "ANTHROPIC_PROFILE"
+
+    def sign_in(intro: str) -> List[str]:
+        """The command that signs in under this name, after the line that introduces it. Nothing for
+        a name that doesn't fit a command: _problem_lines() says why instead."""
+        if not _fits_a_command(credential.profile):
+            return []
+        return [intro, "    ant auth login --profile " + shlex.quote(credential.profile),
+                *_switch_back_lines(credential)]
 
     if reason == "profile_not_found" and by_variable:
         return [
@@ -289,9 +336,7 @@ def _problem_lines(credential: ClaudeCredential) -> List[str]:
             "credential.",
             "To list the saved sign-ins, run:",
             "    ant profile list",
-            "To create this one, run:",
-            login,
-            *_switch_back_lines(credential),
+            *sign_in("To create this one, run:"),
             "Or remove ANTHROPIC_PROFILE from .env and from your terminal.",
         ]
     if reason == "profile_not_found":
@@ -304,8 +349,7 @@ def _problem_lines(credential: ClaudeCredential) -> List[str]:
             "    ant profile list",
             "To make a saved one active, run this with its name in place of NAME:",
             "    ant profile activate NAME",
-            "Or sign in under this name:",
-            login,
+            *sign_in("Or sign in under this name:"),
         ]
     if reason == "profile_name_invalid" and by_variable:
         return [
@@ -334,12 +378,11 @@ def _problem_lines(credential: ClaudeCredential) -> List[str]:
     if reason == "profile_unreadable":
         return [
             f"The Claude sign-in {name} can't be used: its settings file is damaged, or is not a sign-in file.",
+            *(["ANTHROPIC_PROFILE names this sign-in."] if by_variable else []),
             f"The file is {path}",
             *ant_status_lines(credential, to="see what the ant tool finds wrong with it"),
-            "Signing in again does not rewrite a settings file that already exists. Rename or delete that file, "
-            "then sign in again:",
-            login,
-            *_switch_back_lines(credential),
+            *sign_in("Signing in again does not rewrite a settings file that already exists. Rename or delete that "
+                     "file, then sign in again:"),
         ]
     if reason == "signed_out":
         return [
@@ -347,9 +390,7 @@ def _problem_lines(credential: ClaudeCredential) -> List[str]:
             f"Dewey looked for {path}",
             *ant_status_lines(credential),
             'A signed-out sign-in shows there as "configured but not logged in" (ant 2.12).',
-            "To sign in again, run:",
-            login,
-            *_switch_back_lines(credential),
+            *sign_in("To sign in again, run:"),
         ]
     if reason == "credentials_path_missing":
         return [
@@ -357,6 +398,8 @@ def _problem_lines(credential: ClaudeCredential) -> List[str]:
             f"Dewey looked for {path}",
             'The sign-in\'s settings name that location ("credentials_path"). Put the file back there, or have the '
             "program that writes it write it again.",
+            # ant reports this sign-in as "not logged in" and says to run `ant auth login` (ant 2.12).
+            "Signing in again with the ant tool does not write that file, though ant may tell you to sign in.",
             *ant_status_lines(credential),
         ]
     if reason == "profile_type_unknown":
@@ -392,8 +435,15 @@ def blank_credential_message(names: List[str], where: str = "") -> str:
 # ---------------------------------------------------------------- Dewey's startup messages
 
 def mask_url_credentials(text: str) -> str:
-    """Hide the user:password part of every URL in a message (the SDK's https error quotes ANTHROPIC_BASE_URL)."""
-    return re.sub(r"(?<=://)[^/\s]*@", "***@", text)
+    """Hide the user:password part of every web address in a message from the SDK.
+
+    Everything from "://" to the last @ on the same line goes. A password can hold a slash, a
+    space or an @ of its own, so there is no earlier place where it is safe to stop; when another
+    @ follows on the line this hides more than the password, which is the safe way to be wrong.
+    The one refusal known to quote an address never gets this far (see sdk_refusal_message): this
+    is the net under whatever else the SDK may say.
+    """
+    return re.sub(r"(?<=://)[^\n]*@", "***@", text)
 
 
 def startup_error(credential: ClaudeCredential) -> str:
@@ -406,7 +456,7 @@ def startup_error(credential: ClaudeCredential) -> str:
         f"{NEEDS} Set ANTHROPIC_API_KEY, or run `ant auth login` to save a sign-in, or set "
         "ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_IDENTITY_TOKEN (or "
         "ANTHROPIC_IDENTITY_TOKEN_FILE) for Workload Identity Federation. Dewey found none of these; it looked "
-        f"for a saved sign-in in {credential.path}. Leave ANTHROPIC_API_KEY out rather than blank.")
+        f"for a saved sign-in in {_show_controls(credential.path)}. Leave ANTHROPIC_API_KEY out rather than blank.")
 
 
 def startup_warning(credential: ClaudeCredential) -> str:
@@ -421,19 +471,94 @@ def startup_warning(credential: ClaudeCredential) -> str:
     ])
 
 
-def sdk_refusal_message(error: BaseException, env: Optional[Mapping[str, str]] = None) -> str:
+# A web address can carry a password (https://user:password@host), so none is ever repeated in a
+# message: Dewey says which setting holds it. The same rule as for DATABASE_URL (check_database_url).
+_ADDRESS_NOT_SHOWN = "Its value is not shown here, because a web address can contain a password."
+_BASE_URL_VARIABLE = "ANTHROPIC_BASE_URL (in .env or your terminal)"
+
+
+def _settings_file(credential: Optional[ClaudeCredential], env: Mapping[str, str]) -> str:
+    """The settings file of the saved sign-in Dewey's client would use, ready to print, or "" when
+    it would use none (a key, a token or federation variables)."""
+    if credential is None or credential.source != "profile" or not _name_is_valid(credential.profile):
+        return ""
+    return _show_controls(os.path.join(anthropic_config_dir(env), "configs", credential.profile + ".json"))
+
+
+def sdk_refusal_message(error: BaseException, env: Optional[Mapping[str, str]] = None,
+                        credential: Optional[ClaudeCredential] = None) -> str:
     """The SDK refused to build a client for a reason the check above doesn't look for (file
-    permissions, a symlink, a base URL that isn't https...). Its own words say which, so they are
-    repeated, with any password in a URL masked."""
-    lines = [f"{NEEDS} Dewey's Claude client (Anthropic's library) could not load the one it found. "
-             f"It said: {mask_url_credentials(str(error))}"]
+    permissions, a symlink, a web address that isn't https...). Its own words say which, so they
+    are repeated, with one exception: its https refusal quotes the address. For that one Dewey says
+    where the address is set and repeats nothing of what the SDK said.
+
+    `credential` is the verdict the check reached: it says which sign-in the SDK was loading.
+    """
+    if env is None:
+        env = os.environ
+    said = str(error)
+    if "must use https" in said:
+        # The SDK runs this check for a saved sign-in and for federation, on the address in
+        # ANTHROPIC_BASE_URL and on "base_url" in the sign-in's settings file.
+        settings = _settings_file(credential, env)
+        in_file = f'"base_url" in the sign-in\'s settings file, which is {settings}'
+        if settings and env.get("ANTHROPIC_BASE_URL"):
+            set_by = f"That address is set by {_BASE_URL_VARIABLE}, or by {in_file}"
+        elif settings:
+            set_by = f"That address is set by {in_file}"
+        else:
+            set_by = f"That address is set by {_BASE_URL_VARIABLE}."
+        return _printable("\n".join([
+            f"{NEEDS} Dewey's Claude client (Anthropic's library) could not load the one it found: the web address "
+            "it is set to use does not begin with https://.",
+            set_by,
+            _ADDRESS_NOT_SHOWN,
+            "Change it to one that begins with https://, or remove the setting to use Anthropic's own address. "
+            "For a sign-in or Workload Identity Federation, the client accepts http:// only for an address on this "
+            "computer (localhost or 127.0.0.1).",
+        ]))
+
+    # Anything else is repeated: line by line, so that a control character in a path it quotes is
+    # written out, and with the password of any address it quotes masked.
+    said = "\n".join(_show_controls(line) for line in mask_url_credentials(said).split("\n"))
+    lines = [f"{NEEDS} Dewey's Claude client (Anthropic's library) could not load the one it found. It said: {said}"]
     if isinstance(error, UnicodeDecodeError):
         # The one file the SDK reads without catching this: active_config, in the default location.
-        pointer = os.path.join(anthropic_config_dir(env), "active_config")
+        pointer = _show_controls(os.path.join(anthropic_config_dir(env), "active_config"))
         lines += [f"That usually means the file naming the active sign-in is damaged: {pointer}",
                   "To write it again, run this with a saved sign-in's name in place of NAME:",
                   "    ant profile activate NAME"]
-    return _printable("\n".join(lines + ant_status_lines()))
+    return _printable("\n".join(lines + ant_status_lines(credential)))
+
+
+def unreadable_address_message(env: Optional[Mapping[str, str]] = None,
+                               credential: Optional[ClaudeCredential] = None,
+                               base_url_unreadable: bool = False) -> str:
+    """The HTTP library under the SDK could not read a web address it was given (a port that is not
+    a number, a password with a slash in it). Its own message quotes the part it stopped at, which
+    can be part of a password, so nothing of it is repeated.
+
+    `base_url_unreadable`: whether ANTHROPIC_BASE_URL is an address that library can't read
+    (build_stack() asks it). If it isn't, the address is in the sign-in's settings file or in a
+    proxy variable, which the same library reads when the client is built.
+    """
+    if env is None:
+        env = os.environ
+    start = f"{NEEDS} Dewey's Claude client (Anthropic's library) could not be set up to use one: "
+    fix = ("Look for a typing mistake in the address (the port, after the last colon, must be a number). If it holds "
+           "a password with / ? or # in it, write those characters percent-encoded (%2F for /, %3F for ?, %23 for #).")
+    if base_url_unreadable:
+        return "\n".join([start + f"{_BASE_URL_VARIABLE} is not a web address it can read.", _ADDRESS_NOT_SHOWN, fix])
+    # While ANTHROPIC_BASE_URL is set, the client is built on that address and the sign-in's own is
+    # not read yet, so the settings file is named only when the variable is not set at all.
+    settings = "" if "ANTHROPIC_BASE_URL" in env else _settings_file(credential, env)
+    lines = [start + "a web address in its settings is not one it can read."]
+    if settings:
+        lines.append(f'Look at "base_url" in the sign-in\'s settings file, which is {settings}')
+    lines += [("Or look" if settings else "Look") + " at the proxy variables, if any are set: HTTP_PROXY, HTTPS_PROXY, "
+              "ALL_PROXY and NO_PROXY.",
+              "The values are not shown here, because a web address can contain a password.", fix]
+    return _printable("\n".join(lines))
 
 
 def no_credential_in_client_message() -> str:

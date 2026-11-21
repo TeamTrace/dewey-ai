@@ -10,6 +10,8 @@ DEWEY_MCP_TEST_STACK play no part.
 - A sign-in that looks signed out: the client is built and fails on its first request. The server
   starts, because search_archive never calls Claude, and says so on stderr. stdout stays empty:
   in stdio mode it is the JSON-RPC channel.
+- A web address (ANTHROPIC_BASE_URL) the client refuses or can't read: a configuration error too,
+  and the address is never printed, since it can carry a password.
 """
 import pathlib
 import sys
@@ -32,10 +34,10 @@ CONFIG_ERROR = "dewey-mcp: configuration error: DEWEY_STACK=anthropic needs a Cl
 
 class ClaudeStartupTest(unittest.TestCase):
 
-    def start(self, name, argv=()):
+    def start(self, name, argv=(), **env):
         built = cp.build(self, cp.scenario(name))
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.dict(os.environ, {**BASE_ENV, **built.env}, clear=True), cp.no_network(), \
+        with mock.patch.dict(os.environ, {**BASE_ENV, **built.env, **env}, clear=True), cp.no_network(), \
                 mock.patch.object(mcp_server, "load_dotenv"), \
                 mock.patch("providers.build_pgvector_store", return_value=object()), \
                 mock.patch.object(mcp_server, "create_server") as create_server, \
@@ -77,6 +79,23 @@ class ClaudeStartupTest(unittest.TestCase):
         self.assertEqual(code, 0)
         create_server.return_value.run.assert_called_once_with(transport="stdio")
         self.assertEqual((out, err), ("", ""))
+
+    def test_a_web_address_with_a_password_is_never_printed_when_it_stops_the_server(self):
+        # Two ways a web address stops Anthropic's client, and in neither may the address be shown.
+        # http:// with a sign-in: the client refuses it and quotes it whole. A slash in the password:
+        # the HTTP library can't read the address, and its error (once a traceback) quotes part of it.
+        for name, address in (("the default sign-in", "http://reader:Zq7/Kx9@claude-proxy.example.org"),
+                              ("an API key", "https://reader:Zq7/Kx9@claude-proxy.example.org")):
+            code, out, err, create_server = self.start(name, ANTHROPIC_BASE_URL=address)
+            with self.subTest(name):
+                self.assertEqual(code, 1)
+                self.assertTrue(err.startswith(CONFIG_ERROR), err)
+                self.assertIn("ANTHROPIC_BASE_URL", err)
+                self.assertIn("not shown", err)
+                for part in ("Traceback", "Zq7", "Kx9", "reader", "claude-proxy", "Invalid port"):
+                    self.assertNotIn(part, err)
+                self.assertEqual(out, "")
+                create_server.assert_not_called()
 
 
 if __name__ == "__main__":

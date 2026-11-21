@@ -10,7 +10,8 @@ the SDK would stop or fail instead (issue #19, box i):
 - a sign-in that looks signed out: Dewey starts and warns on stderr, because searches
   don't use Claude and signing in again needs no restart;
 - anything else the SDK refuses, or a client it builds with no credential at all:
-  StackConfigError again, in the SDK's own words (RealClientTest).
+  StackConfigError again, in the SDK's own words (RealClientTest). The exception is a web
+  address it refuses or can't read: that is never repeated, since it can carry a password.
 
 The sign-in folders come from tests/claude_profiles.py. Every test replaces the
 environment and points ANTHROPIC_CONFIG_DIR or HOME at a temp folder, so none of
@@ -38,6 +39,11 @@ NEWSROOM = NewsroomConfig(publisher="The Example Times")
 BASE_ENV = {"DEWEY_STACK": "anthropic", "DATABASE_URL": "postgresql://u:p@db.invalid/dewey"}
 FEDERATION = cp.FEDERATION_ENV
 NEEDS = "DEWEY_STACK=anthropic needs a Claude credential."
+
+# Passwords for a web address (http://reader:PASSWORD@claude-proxy.example.org). The second line
+# holds the characters that end the "user:password@" part early for a careless reader of the address.
+PASSWORDS = ("hunter2", "p@ssw0rd", "it's-a-secret", 'say"cheese', "a:b:c",
+             "pa/ss", "pa ss", "a/b@c", "é/ü", "x://y", "x?y#z", "tab\there", "new\nline", "back\\slash")
 
 
 class ConfigDirMixin:
@@ -129,13 +135,33 @@ class CredentialSourceTest(ConfigDirMixin, unittest.TestCase):
         self.assertEqual(self.source(ANTHROPIC_API_KEY="   "), "")
 
     def test_passwords_in_urls_are_masked(self):
+        # A password can hold a slash, a space or an @ of its own, so everything from "://" to the
+        # last @ on the line is hidden. The text has the shape of the SDK's own message, which quotes
+        # the address with repr().
         mask = claude_credentials.mask_url_credentials
-        for password in ("hunter2", "p@ssw0rd", "it's-a-secret", 'say"cheese', "a:b:c"):
-            text = f"base_url must use https (got 'http://reader:{password}@claude-proxy.example.org/v1')"
+        for password in PASSWORDS:
+            url = f"http://reader:{password}@claude-proxy.example.org/v1"
+            text = f"base_url must use https (got {url!r}); the token-exchange endpoint carries secret material."
             with self.subTest(password):
-                self.assertEqual(mask(text), "base_url must use https (got 'http://***@claude-proxy.example.org/v1')")
+                self.assertEqual(mask(text), text.replace(repr(url)[1:-1], "http://***@claude-proxy.example.org/v1"))
+                self.assertNotIn("reader", mask(text))
         self.assertEqual(mask("Config file not found at /home/you@work/.config/anthropic/configs/gone.json"),
                          "Config file not found at /home/you@work/.config/anthropic/configs/gone.json")
+        # One address a line: a line without one is left alone, whatever the lines around it hold.
+        self.assertEqual(mask("see https://docs.example.org/help\n"
+                              "at /home/you@work\n"
+                              "via http://a:b/c@proxy.example.org:1"),
+                         "see https://docs.example.org/help\nat /home/you@work\nvia http://***@proxy.example.org:1")
+
+    def test_whatever_else_the_sdk_says_is_repeated_with_passwords_masked_and_control_characters_written_out(self):
+        # Not a message the pinned SDK has: the net under any refusal that quotes an address or a path.
+        said = ("could not reach http://reader:pa/ss@proxy.example.org/v1\n"
+                "from /tmp/odd\x1b[31mfolder/configs/default.json")
+        message = claude_credentials.sdk_refusal_message(anthropic.AnthropicError(said), {"HOME": "/nowhere"})
+        self.assertIn("It said: could not reach http://***@proxy.example.org/v1\n"
+                      "from /tmp/odd\\u001b[31mfolder/configs/default.json\n", message)
+        for part in ("reader", "pa/ss", "\x1b"):
+            self.assertNotIn(part, message)
 
 
 class BuildStackTest(ConfigDirMixin, unittest.TestCase):
@@ -263,9 +289,12 @@ class BuildStackTest(ConfigDirMixin, unittest.TestCase):
 class RealClientTest(ConfigDirMixin, unittest.TestCase):
     """build_stack() with the real SDK client (only the store is stubbed): the backstop.
 
-    The gate tested above decides from files. These tests show that whatever it decides, the
-    SDK's own refusals never leave build_stack() as a traceback, and that a healthy setup
-    is not tripped up. Building the client sends nothing; connections are refused to be sure.
+    The gate tested above decides from files. These tests show that whatever it decides, a
+    refusal the SDK makes while the client is built, or a web address its HTTP library can't
+    read, ends as a StackConfigError in plain words and not as a traceback, and that a healthy
+    setup is not tripped up. Not covered, and still that library's own error: a proxy or
+    certificate variable it refuses for another reason (an unknown proxy scheme, a certificate
+    file that isn't there). Building the client sends nothing; connections are refused to be sure.
     """
 
     def build(self, **env):
@@ -332,17 +361,134 @@ class RealClientTest(ConfigDirMixin, unittest.TestCase):
         self.assertTrue(message.startswith(NEEDS), message)
         self.assertIn("found none it could use", message)
 
+    def no_part_of_the_address(self, message, password):
+        for part in (password, "reader", "claude-proxy", "(got"):
+            self.assertNotIn(part, message)
+        self.assertNotIn(password, self.stderr.getvalue())
+        self.assertIn("not shown", message)
+
     def test_a_password_in_a_url_is_not_repeated(self):
-        # The SDK's https error quotes ANTHROPIC_BASE_URL, which can carry a proxy's password.
+        # The SDK's https error quotes ANTHROPIC_BASE_URL, which can carry a proxy's password: one with
+        # a slash, a space or an @ in it too. Dewey says which setting to change and repeats none of it.
         d = self.config_dir(profiles=["default"])
-        for password in ("hunter2", "p@ssw0rd", "it's-a-secret", 'say"cheese'):
+        for password in PASSWORDS:
             message = self.refused(ANTHROPIC_CONFIG_DIR=d,
                                    ANTHROPIC_BASE_URL=f"http://reader:{password}@claude-proxy.example.org")
             with self.subTest(password):
-                self.assertIn("must use https", message)
-                self.assertIn("***@claude-proxy.example.org", message)
-                self.assertNotIn(password, message)
-                self.assertNotIn("reader", message)
+                self.assertTrue(message.startswith(NEEDS), message)
+                self.assertIn("does not begin with https://", message)
+                self.assertIn("ANTHROPIC_BASE_URL (in .env or your terminal)", message)
+                self.assertIn(os.path.join(d, "configs", "default.json"), message)   # the other place it can be set
+                self.no_part_of_the_address(message, password)
+
+    def test_a_password_in_a_sign_ins_own_address_is_not_repeated(self):
+        # The same refusal, for "base_url" in the sign-in's settings file. No variable is set, so
+        # the message names the file alone.
+        for password in PASSWORDS:
+            d = self.config_dir(profiles={"default": {
+                **cp.login_config(), "base_url": f"http://reader:{password}@claude-proxy.example.org"}})
+            cp.write_credentials(d, "default")
+            message = self.refused(ANTHROPIC_CONFIG_DIR=d)
+            with self.subTest(password):
+                self.assertIn("does not begin with https://", message)
+                self.assertIn('"base_url" in the sign-in\'s settings file', message)
+                self.assertIn(os.path.join(d, "configs", "default.json"), message)
+                self.assertNotIn("ANTHROPIC_BASE_URL", message)
+                self.no_part_of_the_address(message, password)
+
+    def test_a_password_in_a_url_is_not_repeated_with_federation_variables_either(self):
+        for password in PASSWORDS:
+            message = self.refused(ANTHROPIC_CONFIG_DIR=self.config_dir(), **FEDERATION,
+                                   ANTHROPIC_BASE_URL=f"http://reader:{password}@claude-proxy.example.org")
+            with self.subTest(password):
+                self.assertIn("does not begin with https://", message)
+                self.assertIn("ANTHROPIC_BASE_URL (in .env or your terminal)", message)
+                self.assertNotIn("settings file", message)
+                self.no_part_of_the_address(message, password)
+
+    def test_a_web_address_that_cannot_be_read_is_a_config_error_in_deweys_own_words(self):
+        # The HTTP library under the SDK raises its own error for a badly formed address. That used
+        # to leave build_stack() as a traceback, and its text quotes the part it stopped at: with a
+        # slash in the password, the part of the password before the slash ("Invalid port: 'Zq7'").
+        signed_in, nothing = self.config_dir(profiles=["default"]), self.config_dir()
+        bad = {"ANTHROPIC_BASE_URL": "https://reader:Zq7/Kx9@claude-proxy.example.org"}
+        for env in ({"ANTHROPIC_CONFIG_DIR": signed_in, **bad},
+                    {"ANTHROPIC_CONFIG_DIR": nothing, **bad, "ANTHROPIC_API_KEY": "sk-ant-x"},
+                    {"ANTHROPIC_CONFIG_DIR": nothing, **bad, "ANTHROPIC_AUTH_TOKEN": "sk-ant-oat01-x"},
+                    {"ANTHROPIC_CONFIG_DIR": nothing, **bad, **FEDERATION},
+                    {"ANTHROPIC_CONFIG_DIR": nothing, "ANTHROPIC_BASE_URL": "http://localhost:80a80",
+                     "ANTHROPIC_API_KEY": "sk-ant-x"}):
+            message = self.refused(**env)
+            with self.subTest(sorted(env)):
+                self.assertTrue(message.startswith(NEEDS), message)
+                self.assertIn("ANTHROPIC_BASE_URL (in .env or your terminal) is not a web address", message)
+                self.assertIn("not shown", message)
+                for part in ("Zq7", "Kx9", "reader", "claude-proxy", "80a80", "Invalid port", "sk-ant"):
+                    self.assertNotIn(part, message + self.stderr.getvalue())
+
+    def test_an_unreadable_address_somewhere_else_names_the_places_to_look(self):
+        # ANTHROPIC_BASE_URL is not set, so it is not blamed: the address is in the sign-in's settings
+        # file (as here) or in a proxy variable, which the same library reads.
+        d = self.config_dir(profiles={"default": {
+            **cp.login_config(), "base_url": "https://reader:Zq7/Kx9@claude-proxy.example.org"}})
+        cp.write_credentials(d, "default")
+        message = self.refused(ANTHROPIC_CONFIG_DIR=d)
+        self.assertTrue(message.startswith(NEEDS), message)
+        self.assertIn(os.path.join(d, "configs", "default.json"), message)
+        self.assertIn("HTTPS_PROXY", message)
+        self.assertIn("not shown", message)
+        for part in ("ANTHROPIC_BASE_URL", "Zq7", "Kx9", "reader", "claude-proxy", "Invalid port"):
+            self.assertNotIn(part, message)
+
+    def test_an_unreadable_address_leaves_the_proxy_variables_when_nothing_else_can_be_it(self):
+        # The message alone is tested for these: after a refusal over a proxy variable the SDK's
+        # half-built HTTP client prints "Exception ignored in ..." of its own, which would land in
+        # the test log (seen in a scratch run).
+        proxies = "\nLook at the proxy variables, if any are set: HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY.\n"
+        key = claude_credentials.ClaudeCredential("usable", "ANTHROPIC_API_KEY")
+        sign_in = claude_credentials.ClaudeCredential("usable", "profile", profile="default")
+        variable_set = {"HOME": "/nowhere", "ANTHROPIC_BASE_URL": "https://claude-proxy.example.org"}
+        # With the variable set (and readable), the sign-in's own address isn't read when the client
+        # is built: see the test below.
+        for credential, env in ((key, {"HOME": "/nowhere"}), (sign_in, variable_set)):
+            message = claude_credentials.unreadable_address_message(env, credential, False)
+            with self.subTest(credential.source):
+                self.assertTrue(message.startswith(NEEDS), message)
+                self.assertIn(proxies, message)
+                self.assertIn("not shown", message)
+                for part in ("settings file", "ANTHROPIC_BASE_URL", "claude-proxy"):
+                    self.assertNotIn(part, message)
+
+    def test_the_sign_ins_own_address_is_not_read_at_startup_while_the_variable_is_set(self):
+        # Why the message above leaves the settings file out then. If a new SDK starts reading it
+        # here, this test fails and the message should name the file again.
+        d = self.config_dir(profiles={"default": {
+            **cp.login_config(), "base_url": "https://reader:Zq7/Kx9@claude-proxy.example.org"}})
+        cp.write_credentials(d, "default")
+        llm = self.build(ANTHROPIC_CONFIG_DIR=d, ANTHROPIC_BASE_URL="https://other-proxy.example.org")
+        self.assertEqual(llm.client.base_url.host, "other-proxy.example.org")
+        self.assertEqual((self.stdout.getvalue(), self.stderr.getvalue()), ("", ""))
+
+    @unittest.skipUnless(os.name == "posix", "the SDK checks file modes on POSIX only")
+    def test_an_sdk_refusal_names_the_sign_in_anthropic_profile_chose(self):
+        # ANTHROPIC_PROFILE may be set in .env only, which ant doesn't read: without --profile, the
+        # command would report on the active sign-in instead of the one that was refused.
+        d = self.config_dir(profiles=["default", "staging"])
+        os.chmod(os.path.join(d, "configs", "staging.json"), 0o664)
+        message = self.refused(ANTHROPIC_CONFIG_DIR=d, ANTHROPIC_PROFILE="staging")
+        self.assertIn("writable by group or others", message)
+        self.assertTrue(message.endswith("\n    ant auth status --profile staging"), message)
+
+    @unittest.skipUnless(os.name == "posix", "the SDK checks file modes on POSIX only")
+    def test_an_escape_character_in_a_path_the_sdk_quotes_is_written_out(self):
+        # The SDK's refusal quotes the settings file's path as it is. A folder name can hold an
+        # escape character, which a terminal would obey; Dewey writes it out.
+        d = cp.make_config_dir(self, {"default": cp.SIGNED_IN}, config_dir=cp.temp_dir(self) / "odd\x1b[31mfolder")
+        os.chmod(os.path.join(d, "configs", "default.json"), 0o664)
+        message = self.refused(ANTHROPIC_CONFIG_DIR=d)
+        self.assertIn("writable by group or others", message)
+        self.assertIn("odd\\u001b[31mfolder", message)
+        self.assertNotIn("\x1b", message)
 
     def test_an_active_config_that_is_not_text_is_a_config_error_too(self):
         # The SDK lets UnicodeDecodeError out for this file, which is not one of its own errors.

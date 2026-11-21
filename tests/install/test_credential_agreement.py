@@ -216,6 +216,29 @@ class ProblemLinesTest(unittest.TestCase):
         lines, built = self.lines("credentials kept in another file, which is missing")
         self.assertIn(os.path.join(os.path.dirname(built.config_dir), "elsewhere", "creds.json"), "\n".join(lines))
 
+    def test_credentials_kept_elsewhere_warn_that_ant_will_suggest_signing_in(self):
+        # For this layout `ant auth status` (2.12.1) says the sign-in is "configured but not logged in"
+        # and to run `ant auth login`. A login writes credentials/NAME.json, which is not the file
+        # Dewey's client reads, so the lines say so before they send anyone to that command.
+        lines, _ = self.lines("credentials kept in another file, which is missing")
+        said = [i for i, line in enumerate(lines) if "does not write that file" in line]
+        self.assertEqual(len(said), 1, lines)
+        self.assertLess(said[0], lines.index("    ant auth status"))
+        # Only this kind of sign-in gets the line: for a plain signed-out one, signing in is the fix.
+        lines, _ = self.lines(cp.CASE_3)
+        self.assertNotIn("does not write that file", "\n".join(lines))
+
+    def test_a_damaged_settings_file_says_when_anthropic_profile_chose_the_sign_in(self):
+        # A message about a sign-in that can't be used says where its name came from.
+        lines, built = self.lines("a damaged settings file for the sign-in ANTHROPIC_PROFILE names")
+        self.assertIn('"staging"', lines[0])
+        self.assertIn("ANTHROPIC_PROFILE names this sign-in.", lines)
+        self.assertIn(os.path.join(built.config_dir, "configs", "staging.json"), "\n".join(lines))
+        self.assertIn("    ant auth status --profile staging", lines)
+        # Not said of a sign-in that no variable chose.
+        lines, _ = self.lines("a settings file that is not JSON")
+        self.assertNotIn("ANTHROPIC_PROFILE", "\n".join(lines))
+
     def test_a_name_from_anthropic_profile_is_passed_to_ant_auth_status(self):
         # In another terminal, or with the variable only in .env, plain `ant auth status` looks at the active sign-in.
         lines, _ = self.lines("the sign-in named by ANTHROPIC_PROFILE is signed out")
@@ -262,6 +285,84 @@ class ProblemLinesTest(unittest.TestCase):
                      self.check.startup_warning(status._replace(state="unconfirmed", reason="signed_out"))):
             self.assertIn("\\udce9", text)
             text.encode("utf-8")
+            # Written out like that it is another name, so no command is built from it.
+            self.assertNotIn("--profile", text)
+            self.assertIn("can't be shown as it is", text)
+        # The wizard's check step prints these lines for a healthy sign-in, as they are.
+        found = status._replace(state="usable", source="profile", reason="")
+        self.assertEqual(self.check.ant_status_lines(found)[1], "    ant auth status")
+        "\n".join(self.check.ant_status_lines(found)).encode("utf-8")
+
+    # Line breaks and the other characters a terminal acts on instead of showing.
+    CONTROLS = {chr(n) for n in (*range(0x20), *range(0x7f, 0xa0), 0x2028, 0x2029)}
+    REASONS = (("missing", "profile_not_found"), ("missing", "profile_unreadable"), ("unconfirmed", "signed_out"),
+               ("unconfirmed", "credentials_path_missing"), ("unconfirmed", "profile_type_unknown"))
+
+    def messages(self, status):
+        """Every text Dewey or the wizard builds from a verdict: the lines, and the two startup messages."""
+        lines = self.check.credential_problem_lines(status)
+        return lines, (self.check.startup_error(status) if status.state == "missing"
+                       else self.check.startup_warning(status))
+
+    def test_a_name_with_a_line_break_or_escape_character_is_written_out_and_never_put_in_a_command(self):
+        """An active_config file holding two lines, or a variable with an escape character in it, gives
+        a name the SDK takes as it is. Printed raw, the line break would cut the printed command in two
+        and the escape character would go to the terminal. So the name is written out (\\n) wherever it
+        is shown, and no command is built from it."""
+        for name in ("work\nextra", "work\x1b[2Jextra", "tab\there", "cr\rhere", "del\x7fhere", "csi\x9b2Jhere",
+                     "sep\u2028here"):
+            for state, reason in self.REASONS:
+                for selected_by in ("ANTHROPIC_PROFILE", "active_config"):
+                    status = self.check.ClaudeCredential(state, "" if state == "missing" else "profile", reason, name,
+                                                         selected_by, f"/tmp/dewey/configs/{name}.json", "default")
+                    lines, message = self.messages(status)
+                    with self.subTest(name=name, reason=reason, selected_by=selected_by):
+                        self.assertTrue(lines)
+                        for line in lines:
+                            self.assertFalse(self.CONTROLS & set(line), line)
+                        self.assertFalse((self.CONTROLS - {"\n"}) & set(message), message)
+                        self.assertNotIn(name, message)   # so no line break of the name's is in it either
+                        self.assertFalse([line for line in lines if line.startswith("    ") and "--profile" in line],
+                                         "a command was built from a name that can't be typed")
+                        # Said once, straight after the line that shows the name.
+                        self.assertEqual([i for i, line in enumerate(lines) if "can't be shown as it is" in line], [1])
+        status = self.check.ClaudeCredential("missing", "", "profile_not_found", "work\nextra", "active_config",
+                                             "/tmp/dewey/configs/work\nextra.json", "work\nextra")
+        lines, _ = self.messages(status)
+        self.assertIn('"work\\nextra"', lines[0])
+        self.assertIn("Dewey looked for /tmp/dewey/configs/work\\nextra.json", lines)
+        self.assertIn("    ant profile activate NAME", lines)   # the command that writes active_config again
+
+    @unittest.skipUnless(os.name == "posix", "Windows refuses a file name with a line break in it another way")
+    def test_an_active_config_file_holding_two_lines_is_reported_in_one_piece(self):
+        # The same, from real files: the SDK reads the whole file as the name.
+        config_dir = cp.make_config_dir(self, {"default": cp.SIGNED_IN}, active="work\nextra\n")
+        status = self.check.anthropic_credential_status({"HOME": str(cp.temp_dir(self)),
+                                                         "ANTHROPIC_CONFIG_DIR": config_dir})
+        self.assertEqual((status.state, status.reason, status.profile),
+                         ("missing", "profile_not_found", "work\nextra"))
+        lines, message = self.messages(status)
+        self.assertIn('The active Claude sign-in is "work\\nextra"', lines[0])
+        self.assertNotIn("work\nextra", message)
+        self.assertFalse([line for line in lines if "ant auth login" in line])
+
+    def test_control_characters_in_a_path_are_written_out(self):
+        # A folder name can hold them too (ANTHROPIC_CONFIG_DIR, or "credentials_path" in a settings file).
+        odd = "/tmp/dewey\x1b[31m/red\nfolder"
+        shown = "/tmp/dewey\\u001b[31m/red\\nfolder"
+        for state, reason in self.REASONS:
+            status = self.check.ClaudeCredential(state, "" if state == "missing" else "profile", reason, "work",
+                                                 "active_config", f"{odd}/work.json", "work")
+            lines, message = self.messages(status)
+            with self.subTest(reason):
+                self.assertIn(f"{shown}/work.json", "\n".join(lines))
+                self.assertFalse((self.CONTROLS - {"\n"}) & set(message), message)
+                self.assertNotIn(odd, message)
+        # Nothing saved at all: the message names the config folder, which ANTHROPIC_CONFIG_DIR can set.
+        nothing = self.check.ClaudeCredential("missing", reason="no_credential", path=odd)
+        message = self.check.startup_error(nothing)
+        self.assertIn(f"it looked for a saved sign-in in {shown}.", message)
+        self.assertFalse(self.CONTROLS & set(message), message)
 
     def test_printed_commands_paste_safely_for_odd_names(self):
         """A sign-in's name can hold spaces and shell characters. Each printed command must be safe to
@@ -542,6 +643,19 @@ class SummaryTest(unittest.TestCase):
         # A key typed into the wizard is saved, so there is nothing to point out.
         self.assertEqual(self.report(cp.CASE_3, {"ANTHROPIC_API_KEY": "sk-ant-typed"}, ANTHROPIC_API_KEY=cp.API_KEY)[0], [])
 
+    def test_a_key_typed_into_the_wizard_is_the_credential_that_is_judged(self):
+        # The key is about to be written to .env, so Dewey will have it whatever the saved sign-in is
+        # like. No key is in the terminal here: only the typed one can make these two cases usable.
+        typed = {**ANTHROPIC, "ANTHROPIC_API_KEY": "sk-ant-typed"}
+        for name in (cp.CASE_3, cp.CASE_1):
+            with self.subTest(name):
+                self.assertEqual(self.report(name, typed)[0], [])
+                with mock.patch.dict(os.environ, cp.build(self, cp.scenario(name)).env, clear=True):
+                    self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
+                    self.assertTrue(install.anthropic_credential_present(typed))
+                    self.assertEqual(install.claude_credential(typed).source, "ANTHROPIC_API_KEY")
+                    self.assertFalse(install.anthropic_credential_present(dict(ANTHROPIC)))
+
     def test_a_blank_token_or_exported_blank_key_is_reported(self):
         # Dewey refuses to start with either, whatever else is set.
         lines, _ = self.report("the default sign-in", ANTHROPIC_AUTH_TOKEN="")
@@ -627,6 +741,65 @@ class CheckServicesTest(unittest.TestCase):
         self.assertIn("  Anthropic API key: not checked: it is set in this terminal", shown)
         self.assertNotIn(cp.API_KEY, shown)
         self.assertNotIn(": ok", shown)
+
+    def claude_lines(self, shown):
+        return [line for line in shown.splitlines() if line.startswith(("  Claude", "  Anthropic"))]
+
+    def test_a_blank_key_or_token_is_reported_instead_of_a_sign_in_that_was_found(self):
+        # Dewey refuses to start with a blank ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN whatever else
+        # is set, so this step must not say "found" (or "ok") while one is.
+        blank_token_line = "ANTHROPIC_AUTH_TOKEN=''\n"
+        for env, env_file_text, said in (
+                ({"ANTHROPIC_API_KEY": "   "}, "", "ANTHROPIC_API_KEY is set but empty in this terminal"),
+                ({"ANTHROPIC_AUTH_TOKEN": ""}, "", "ANTHROPIC_AUTH_TOKEN is set but empty in this terminal"),
+                ({}, blank_token_line, "ANTHROPIC_AUTH_TOKEN is set but empty in .env")):
+            shown = self.check("the default sign-in", env_file_text=env_file_text, **env)
+            with self.subTest(said):
+                claude = self.claude_lines(shown)
+                self.assertEqual(len(claude), 1, shown)
+                self.assertIn("NOT usable", claude[0])
+                self.assertIn(said, claude[0])
+                self.assertIn("won't start", claude[0])
+                self.assertNotIn("found the saved sign-in", shown)
+        # A real token in the terminal hides a blank line in .env, as it does for Dewey.
+        shown = self.check("the default sign-in", env_file_text=blank_token_line, ANTHROPIC_AUTH_TOKEN=cp.AUTH_TOKEN)
+        self.assertNotIn("NOT", shown)
+        self.assertIn("ANTHROPIC_AUTH_TOKEN is set", shown)
+
+    @unittest.skipIf(anthropic is None, "needs the anthropic package (requirements.txt)")
+    def test_a_blank_token_is_reported_instead_of_ok_for_a_typed_key(self):
+        # The key is fine, and Dewey still won't start: "ok" would be the wrong thing to read here.
+        with mock.patch.object(anthropic, "Anthropic") as client:
+            shown = self.check("nothing set and nothing saved", {"ANTHROPIC_API_KEY": "sk-ant-typed"},
+                               env_file_text="ANTHROPIC_API_KEY='sk-ant-typed'\nANTHROPIC_AUTH_TOKEN=''\n")
+        claude = self.claude_lines(shown)
+        self.assertEqual(len(claude), 1, shown)
+        self.assertIn("NOT usable", claude[0])
+        self.assertIn("ANTHROPIC_AUTH_TOKEN is set but empty in .env", claude[0])
+        self.assertIn("not tested", claude[0])
+        self.assertNotIn(": ok", shown)
+        self.assertNotIn("sk-ant-typed", shown)
+        client.assert_not_called()
+        # A blank key exported in the terminal hides the key that was typed and saved.
+        with mock.patch.object(anthropic, "Anthropic") as client:
+            shown = self.check("nothing set and nothing saved", {"ANTHROPIC_API_KEY": "sk-ant-typed"},
+                               env_file_text="ANTHROPIC_API_KEY='sk-ant-typed'\n", ANTHROPIC_API_KEY="")
+        self.assertIn("NOT usable: ANTHROPIC_API_KEY is set but empty in this terminal", shown)
+        client.assert_not_called()
+
+    @unittest.skipIf(anthropic is None, "needs the anthropic package (requirements.txt)")
+    def test_a_web_address_the_http_library_cannot_read_is_not_quoted_back(self):
+        # Its error quotes the part it stopped at, which is part of the password here ("Invalid port: 'Zq7'").
+        # The client is never built, so nothing is sent.
+        shown = self.check(cp.CASE_3, {"ANTHROPIC_API_KEY": "sk-ant-typed"},
+                           ANTHROPIC_BASE_URL="https://reader:Zq7/Kx9@claude-proxy.example.org")
+        claude = self.claude_lines(shown)
+        self.assertEqual(len(claude), 1, shown)
+        self.assertIn("NOT checked", claude[0])
+        self.assertIn("ANTHROPIC_BASE_URL", claude[0])
+        self.assertIn("not shown", claude[0])
+        for part in ("Zq7", "Kx9", "reader", "claude-proxy", "Invalid port", "sk-ant-typed"):
+            self.assertNotIn(part, shown)
 
 
 class WithoutTheSharedCheckTest(unittest.TestCase):

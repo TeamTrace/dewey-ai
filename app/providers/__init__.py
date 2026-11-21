@@ -28,7 +28,7 @@ from .base import LLMProvider, Retriever
 from .claude_credentials import (
     MISSING, UNCONFIRMED, USABLE, anthropic_credential_status, blank_credential_message,
     blank_credential_variables, no_credential_in_client_message, sdk_refusal_message, startup_error,
-    startup_warning,
+    startup_warning, unreadable_address_message,
 )
 
 STACKS = ("azure", "anthropic", "open")
@@ -62,6 +62,18 @@ def anthropic_credential_source() -> str:
     """
     credential = anthropic_credential_status(os.environ)
     return credential.source if credential.state == USABLE else ""
+
+
+def _unreadable_address(address: str) -> bool:
+    """True when the HTTP library under the Claude SDK can't read this web address. The SDK hands
+    ANTHROPIC_BASE_URL to the same parser, so this says whether that variable is what stopped it."""
+    import httpx2
+
+    try:
+        httpx2.URL(address)
+    except httpx2.InvalidURL:
+        return True
+    return False
 
 
 def current_stack() -> str:
@@ -105,11 +117,14 @@ def build_stack(newsroom: NewsroomConfig) -> Tuple[LLMProvider, Retriever]:
 
     if stack == "anthropic":
         import anthropic
+        import httpx2  # the HTTP library the pinned SDK is built on: its InvalidURL is caught below
 
         from .anthropic_llm import DEFAULT_MODEL, AnthropicLLM
 
-        # The Claude client is built with no arguments, so the SDK picks the credential. Each
-        # way that can go wrong ends here as one plain message, never as the SDK's traceback.
+        # The Claude client is built with no arguments, so the SDK picks the credential. Each way
+        # the credential or the client's web address can stop that ends here as one plain message,
+        # not as the SDK's traceback. (A proxy or certificate variable the HTTP library refuses for
+        # another reason, such as an unknown proxy scheme, still ends as that library's own error.)
         blanked = blank_credential_variables(os.environ)
         if blanked:
             raise StackConfigError(blank_credential_message(blanked))
@@ -130,7 +145,13 @@ def build_stack(newsroom: NewsroomConfig) -> Tuple[LLMProvider, Retriever]:
             # Backstop: the check above reads files and doesn't see everything the SDK refuses
             # (file permissions, symlinks, a base URL that isn't https). UnicodeDecodeError is what
             # the SDK lets out for an active_config file that isn't text.
-            raise StackConfigError(sdk_refusal_message(e, os.environ)) from None
+            raise StackConfigError(sdk_refusal_message(e, os.environ, credential)) from None
+        except httpx2.InvalidURL:
+            # A web address the HTTP library can't read: ANTHROPIC_BASE_URL, "base_url" in the
+            # sign-in's settings file, or a proxy variable. Its message quotes the part it stopped
+            # at, which can be part of a password, so it is not repeated (as for DATABASE_URL).
+            raise StackConfigError(unreadable_address_message(
+                os.environ, credential, _unreadable_address(os.environ.get("ANTHROPIC_BASE_URL", "")))) from None
         if all(getattr(llm.client, held, None) is None for held in ("api_key", "auth_token", "credentials")):
             # In the default location the SDK skips a sign-in it can't load and says nothing; the
             # first question would then fail with "Could not resolve authentication method".
