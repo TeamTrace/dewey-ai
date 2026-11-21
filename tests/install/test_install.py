@@ -22,6 +22,7 @@ import io  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import shutil  # noqa: E402
+import signal  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
 from unittest import mock  # noqa: E402
@@ -252,13 +253,17 @@ class WizardImportTests(unittest.TestCase):
         if python is not None:
             env.pop("PYTHONPATH", None)  # another Python must see its own packages only, not the test runner's
         transcript = io.StringIO()
+        # preexec_fn: a test run started in the background of a script inherits "ignore Control+C",
+        # and the wizard would inherit it too; the Control+C test then waits 60 seconds and fails.
         child = pexpect.spawn(str(python or sys.executable), ["install.py", "--no-browser", *args], cwd=str(self.root),
-                              env=env, encoding="utf-8", timeout=60, dimensions=(50, 200))
+                              env=env, encoding="utf-8", timeout=60, dimensions=(50, 200),
+                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
         child.logfile_read = transcript
         try:
             for pattern, answer in script:
                 child.expect(pattern)
                 child.sendline(answer() if callable(answer) else answer)
+            pattern = "the end of the wizard"
             child.expect(pexpect.EOF)
         except (pexpect.TIMEOUT, pexpect.EOF) as e:
             raise AssertionError(f"wizard didn't reach {pattern!r}; output so far:\n{transcript.getvalue()}") from e

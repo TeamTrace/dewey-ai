@@ -44,10 +44,13 @@ class MetadataError(ValueError):
     this module. Raised before the search or its embedding call. The message gives an entry's
     position and kind, never its value, which can be text a model wrote.
 
-    Deliberately not a UserFacingError. Through the MCP server only ask_archive can reach
-    this, when the search plan from Dewey's own model is malformed, and a client can't fix
-    that: it gets the server's generic message with a log reference, and whoever runs Dewey
-    finds this message in the log."""
+    It is for code that calls a retriever directly. Inside Dewey.process() (ask_archive, the
+    demo page) tips.py reads the author entries first, and for most malformed plans fails there
+    with its own TypeError or KeyError before a retriever is reached.
+
+    Deliberately not a UserFacingError: an MCP client can't fix a malformed plan from Dewey's
+    own model, so either way it gets the server's generic message with a log reference, and
+    whoever runs Dewey finds the exact error in the log."""
 
 
 _AUTHOR_ENTRY = '{"name": "Jane Doe"}'

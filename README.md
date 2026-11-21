@@ -190,10 +190,10 @@ The same checks run on every pull request and push to main (`.github/workflows/t
 
 <details><summary>Postgres tests (skipped by default)</summary>
 
-The Postgres filter tests in `tests/providers/` are skipped unless `DEWEY_TEST_DATABASE_URL` points at a throwaway Postgres with pgvector. They build Dewey's tables in a schema of their own, adding the `vector` extension there if it's missing. They drop the schema afterwards, so an existing index is untouched. Replace PASSWORD with your test database's password:
+The Postgres tests (the filter tests in `tests/providers/` and the wizard's database check in `tests/install/test_env_and_checks.py`) are skipped unless `DEWEY_TEST_DATABASE_URL` points at a throwaway Postgres with pgvector. They build Dewey's tables in a schema of their own, adding the `vector` extension there if it's missing. They drop the schema afterwards, so an existing index is untouched. Replace PASSWORD with your test database's password:
 
 ```bash
-DEWEY_TEST_DATABASE_URL='postgresql://postgres:PASSWORD@localhost:5432/postgres' python -m unittest tests.providers.test_pgvector_store
+DEWEY_TEST_DATABASE_URL='postgresql://postgres:PASSWORD@localhost:5432/postgres' python -m unittest tests.providers.test_pgvector_store tests.install.test_env_and_checks
 ```
 
 </details>

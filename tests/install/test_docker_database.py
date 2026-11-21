@@ -171,7 +171,8 @@ class TheCommandTests(unittest.TestCase):
         self.assertIn(COMPOSE_LINE, text)
         self.assertIn("An archive indexed in one isn't in the other.", text)
         self.assertNotIn("docker-compose.yml also needs", text)
-        self.assertIn("This wizard saves it in .env (as POSTGRES_PASSWORD)", text)
+        # Future tense: nothing is saved until .env is written at the end of the wizard.
+        self.assertIn("This wizard will save it in .env (as POSTGRES_PASSWORD) with your other answers", " ".join(text.split()))
 
     def test_the_command_is_built_from_the_constants(self):
         self.assertEqual((install.PGVECTOR_CONTAINER, install.PGVECTOR_VOLUME, install.PGVECTOR_MOUNT),
@@ -232,7 +233,7 @@ class TheCommandTests(unittest.TestCase):
         self.assertEqual(result, {"DATABASE_URL": url_for(password)})  # no POSTGRES_PASSWORD key
         self.assertNotIn("p@ss-word!", text)
         self.assertIn("saved only inside DATABASE_URL", text)
-        self.assertNotIn("This wizard saves it in .env (as POSTGRES_PASSWORD)", text)
+        self.assertNotIn("will save it in .env (as POSTGRES_PASSWORD)", " ".join(text.split()))
         result, text = offer(cur, look("absent"), ["n"])
         self.assertEqual(result, {"DATABASE_URL": ""})
         self.assertIn("isn't saved", text)
@@ -525,6 +526,15 @@ class SavedPasswordTests(unittest.TestCase):
 
 
 class DryRunTests(unittest.TestCase):
+    def test_a_dry_run_with_no_saved_address_says_why_the_summary_will_call_it_missing(self):
+        # A real run with the same answers saves the address; the dry run's Summary says
+        # "Still missing: DATABASE_URL", which would read as a problem without this line.
+        result, text = offer({}, None, dry_run=True, new_password=False)
+        self.assertEqual(result, {"DATABASE_URL": ""})
+        self.assertIn("So the Summary below lists DATABASE_URL as still missing", text)
+        saved = {"DATABASE_URL": url_for(SAVED)}
+        self.assertNotIn("still missing", offer(saved, None, dry_run=True, new_password=False)[1])
+
     def test_a_dry_run_asks_docker_nothing_shows_no_password_and_asks_nothing(self):
         cur = {"POSTGRES_PASSWORD": SAVED, "DATABASE_URL": url_for(SAVED)}
         # No look is handed in and none may be made; no answers are queued; no password may be made.

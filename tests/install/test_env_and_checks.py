@@ -229,6 +229,7 @@ class PostgresCheckTests(unittest.TestCase):
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as empty, \
                 mock.patch.dict(os.environ, {"ANTHROPIC_CONFIG_DIR": empty}, clear=True), \
+                mock.patch.object(install, "ENV_PATH", pathlib.Path(empty) / ".env"), \
                 mock.patch.dict(sys.modules, {"psycopg": module, "anthropic": None}), \
                 contextlib.redirect_stdout(out):
             returned = install.check_services(dict(self.VALUES))
@@ -365,6 +366,7 @@ class RealPostgresCheckTests(unittest.TestCase):
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as empty, \
                 mock.patch.dict(os.environ, {**env, "ANTHROPIC_CONFIG_DIR": empty}, clear=True), \
+                mock.patch.object(install, "ENV_PATH", pathlib.Path(empty) / ".env"), \
                 mock.patch.dict(sys.modules, {"anthropic": None}), \
                 contextlib.redirect_stdout(out):
             install.check_services({"DEWEY_STACK": "anthropic", "DATABASE_URL": DATABASE_URL})

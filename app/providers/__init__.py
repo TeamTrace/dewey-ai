@@ -59,6 +59,10 @@ def anthropic_credential_source() -> str:
     API key, and one the SDK would refuse isn't counted. "" covers both states that aren't
     `usable`: a missing credential and a sign-in that looks signed out. install.py loads the
     same file, so its anthropic_credential_present() always agrees with this.
+
+    build_stack() no longer decides with this: it uses anthropic_credential_status() directly,
+    which tells a missing credential (refuse) from a signed-out sign-in (warn and start). This
+    is kept for the tests that hold Dewey and the wizard together.
     """
     credential = anthropic_credential_status(os.environ)
     return credential.source if credential.state == USABLE else ""

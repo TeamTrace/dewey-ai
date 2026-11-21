@@ -984,6 +984,9 @@ def offer_pgvector_container(cur: Optional[dict] = None, look: Optional[DockerLo
         say("  If there is none yet, it prints this command, with a password in place of PASSWORD.)")
         say_command(*pgvector_run_command("PASSWORD"))
         say("  This dry run asks Docker nothing, makes no password and saves nothing about the database.")
+        if not saved_url:
+            say("  So the Summary below lists DATABASE_URL as still missing: a real run saves it once the")
+            say("  database is running.")
         return {"DATABASE_URL": saved_url}
     if look is None:
         look = find_docker_database()
@@ -1085,11 +1088,11 @@ def offer_pgvector_container(cur: Optional[dict] = None, look: Optional[DockerLo
             say("     wizard can't use here (it isn't only letters and digits) and leaves as it is. So the")
             say("     new password is saved only inside DATABASE_URL, and only if you answer y below.")
         elif made_here and seen:
-            say("   - The password above was made for you. This wizard saves it in .env (as POSTGRES_PASSWORD)")
-            say("     and uses it again if you re-run it.")
+            say("   - The password above was made for you. This wizard will save it in .env (as")
+            say("     POSTGRES_PASSWORD) with your other answers, and use it again if you re-run it.")
         elif made_here:
-            say("   - The password above was made for you. This wizard saves it in .env (as POSTGRES_PASSWORD)")
-            say("     only if you answer y below.")
+            say("   - The password above was made for you. This wizard will save it in .env (as")
+            say("     POSTGRES_PASSWORD) with your other answers, but only if you answer y below.")
         say("   - Its data is kept in a Docker volume named dewey-db-data, which stays if the container")
         say("     is removed.")
         say("   - It starts again when Docker starts, unless you stopped it yourself. If it is ever")
@@ -2282,7 +2285,7 @@ def get_archive(dry_run: bool = False) -> None:
             next_step = "full"
 
         if next_step == "full":
-            say("A big archive can take a while. Ctrl+C stops it (and this setup) without changing data/.")
+            say("A big archive can take a while. Ctrl+C stops it (and this wizard) without changing data/.")
             if run_importer(plan):
                 say()
                 offer_trial_cleanup(trial_files)
@@ -2361,6 +2364,10 @@ def anthropic_credential_present(values: dict, env_file: Optional[dict] = None) 
     The same verdict as providers.anthropic_credential_source() gives at Dewey's startup
     (tests/install/test_credential_agreement.py holds the two together, and against the SDK).
     A sign-in that looks signed out is not counted, though Dewey still starts with one.
+
+    The wizard itself no longer decides with this yes or no: missing_required() and
+    summary_report() use the three states (usable, missing, unconfirmed). It is kept for the
+    tests that hold the wizard and Dewey together, and for anyone who wants one answer.
     """
     credential = claude_credential(values, env_file)
     if credential is None:
@@ -2399,7 +2406,7 @@ def summary_report(values: dict, missing: list, env_file: Optional[dict] = None)
     lines = []
     if missing:
         lines.append(f"Still missing: {', '.join(missing)}. Dewey won't start until these are set; "
-                     "re-run this installer or edit .env when you have them.")
+                     "re-run this wizard or edit .env when you have them.")
     if values.get("DEWEY_STACK") != "anthropic":
         return lines
     typed_key = bool(values.get("ANTHROPIC_API_KEY"))
@@ -2412,7 +2419,7 @@ def summary_report(values: dict, missing: list, env_file: Optional[dict] = None)
 
     credential = check.anthropic_credential_status(claude_environment(values, env_file))
     problem = ["  " + line for line in check.credential_problem_lines(credential)]
-    or_a_key = "  Or paste an Anthropic API key at the Claude question when you run this installer again."
+    or_a_key = "  Or paste an Anthropic API key at the Claude question when you run this wizard again."
     if credential.state == "missing" and problem:
         lines.append("About ANTHROPIC_API_KEY: a saved Claude sign-in would do instead of a key, but the one "
                      "selected can't be used.")

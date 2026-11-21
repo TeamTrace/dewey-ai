@@ -326,7 +326,8 @@ def build_launch_plan(env: Mapping[str, str]) -> LaunchPlan:
     summary.append(f"Answers up to {concurrency} question(s) at once (DEWEY_CONCURRENCY).")
     summary.append("Telemetry, API page, /monitoring and Gradio's MCP server: off.")
     summary.append("For colleagues and AI tools, use Dewey's MCP server instead: docs/MCP.md.")
-    # These two come last, so they sit right above Gradio's own lines. launch() is not quiet,
+    # These two are Dewey's last lines on stdout, so they sit just above Gradio's own lines
+    # (a warning from build_stack(), on stderr, can still come between them). launch() is not quiet,
     # because Gradio's "Running on local URL" line is the only place the port actually used is
     # shown; unless it is quiet, Gradio also prints a tip to set share=True, which would
     # contradict "share links: off" (tests/deploy/test_main_launch.py pins both lines).

@@ -580,7 +580,7 @@ class SummaryTest(unittest.TestCase):
     """What the Summary says after the .env text."""
 
     STILL_MISSING = ("Still missing: ANTHROPIC_API_KEY. Dewey won't start until these are set; "
-                     "re-run this installer or edit .env when you have them.")
+                     "re-run this wizard or edit .env when you have them.")
 
     def report(self, name, values=None, env_file=None, **env):
         built = cp.build(self, cp.scenario(name))
@@ -675,7 +675,7 @@ class SummaryTest(unittest.TestCase):
             values = {"DEWEY_STACK": "open", "OPEN_LLM_MODEL": "", "DATABASE_URL": "postgresql://x/y"}
             self.assertEqual(install.summary_report(values, install.missing_required(values)),
                              ["Still missing: OPEN_LLM_MODEL. Dewey won't start until these are set; "
-                              "re-run this installer or edit .env when you have them."])
+                              "re-run this wizard or edit .env when you have them."])
 
 
 class CheckServicesTest(unittest.TestCase):

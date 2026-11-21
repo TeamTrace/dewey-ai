@@ -177,6 +177,9 @@ Your AI tool (the [MCP client](GLOSSARY.md#mcp-client)) reaches Dewey's server o
    If it prints nothing and waits, it works: press Control+D once to stop it (Control+C doesn't). On
    Windows, close the window instead (*not tested by us*). If it prints
    `dewey-mcp: configuration error` and exits, fix `.env` first ([common errors](INSTALL.md#troubleshooting)).
+   If it prints lines that start `Dewey: warning: could not confirm a Claude credential` and then waits,
+   it has started too: searches work, but answers need the sign-in fixed
+   ([STACKS.md](STACKS.md#claude-anthropic-api)).
 
 Examples on this page use macOS paths. Elsewhere they look like this:
 
