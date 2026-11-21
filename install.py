@@ -17,7 +17,10 @@ installed. It:
      services it can reach;
   5. for the Postgres stacks, helps get the archive into data/ with one of
      the importers in app/importers/ (a small trial run first), then
-     optionally indexes the articles in data/.
+     optionally indexes the articles in data/, if the Python running it has
+     Dewey's packages;
+  6. lists what is left to do, in order, with the commands, and shows how to
+     connect an AI tool, naming a Python that has Dewey's packages.
 
 Re-running it is safe: values already in .env are offered as defaults, so you
 can change one option without re-entering everything.
@@ -41,7 +44,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
@@ -433,10 +436,12 @@ def _typed(system: str, path: str) -> str:
     return path if re.fullmatch(r"[\w:\\/.~-]+", path) else "'" + path.replace("'", "''") + "'"
 
 
-def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_first: bool = False) -> List[str]:
+def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_first: bool = False,
+                      rerun: bool = True) -> List[str]:
     """The lines for "make or turn on the virtual environment, then run this wizard again", for
     the computer `where` describes and the Python `version` running the wizard (this computer
-    and this Python when not given).
+    and this Python when not given). `rerun=False` leaves out the last step, running the wizard
+    again: for an environment that already has Dewey's packages and only has to be turned on.
 
     When the Dewey folder has a working .venv and this Python is not in it: turn that on, and
     make nothing again (not even when another project's environment is the one turned on).
@@ -496,7 +501,7 @@ def environment_steps(where: Optional[PythonSituation] = None, version=None, cd_
         if where.system == "linux":  # a new environment's pip there is older than the guide asks for
             lines.append("Update pip before the last command: step 4 of Create a virtual environment in "
                          "docs/INSTALL.md.")
-    return lines + ["Start this wizard again:", "  python install.py"]
+    return lines + (["Start this wizard again:", "  python install.py"] if rerun else [])
 
 
 def python_reason(verdict: str, version) -> List[str]:
@@ -1125,6 +1130,136 @@ def needs_local_models(values: dict) -> bool:
         values.get("EMBEDDING_PROVIDER"), values.get("RERANK_PROVIDER"))
 
 
+# ------------------------------------------ does a Python have Dewey's packages?
+#
+# Before it starts the indexer, and when it prints the MCP example, the wizard checks that the
+# Python in question can find what Dewey's code imports. These are import names, not package
+# names (python-dotenv is "dotenv"), and deliberately few: enough to tell whether
+# requirements.txt was installed in that Python, not a copy of it.
+# tests/install/test_packages.py checks that each is imported somewhere under app/, and is
+# found where requirements.txt is installed.
+REQUIREMENTS, REQUIREMENTS_LOCAL = "requirements.txt", "requirements-local.txt"
+MODULES_EVERY_STACK = ("dotenv", "pydantic", "mcp")
+MODULES_POSTGRES = ("psycopg", "pgvector", "numpy")                 # the Postgres store
+MODULES_CHAT = {"anthropic": ("anthropic",), "open": ("openai",)}   # each Postgres stack's chat SDK
+MODULES_VOYAGE = ("voyageai",)                                      # when Voyage AI hosts a search model
+MODULES_AZURE = ("openai", "azure.core", "azure.search.documents", "azure.storage.blob")
+MODULES_LOCAL = ("torch", "sentence_transformers")                  # PyTorch and requirements-local.txt
+PROBE_TIMEOUT = 30  # seconds; an answer takes a few hundredths of one
+
+# What modules_missing() runs in a fresh copy of the Python it asks. It only looks names up:
+# nothing of Dewey's is imported (looking up a dotted name does import its parent package).
+# The current folder comes off the path first: started in the Dewey folder, Python would find
+# `data` and `docs` there as modules. A name counts only when something loadable is behind it,
+# because a leftover empty folder in site-packages is found too. An error while looking a name
+# up means that name is missing, not that the check failed. The last line says the probe got
+# to its end, so that an empty answer is never mistaken for "nothing is missing".
+_PROBE = """
+import importlib.util, sys
+if sys.path and sys.path[0] == "":
+    del sys.path[0]
+for name in sys.argv[1:]:
+    try:
+        spec = importlib.util.find_spec(name)
+        found = spec is not None and bool(spec.origin)
+    except Exception:
+        found = False
+    if not found:
+        print("missing " + name)
+print("checked " + str(len(sys.argv) - 1))
+"""
+
+
+def requirement_modules(values: dict) -> List[str]:
+    """The modules that stand for "requirements.txt is installed", for this setup's stack."""
+    modules = list(MODULES_EVERY_STACK)
+    stack = values.get("DEWEY_STACK")
+    if stack == "azure":
+        return modules + list(MODULES_AZURE)
+    modules += list(MODULES_POSTGRES) + list(MODULES_CHAT.get(stack, ()))
+    if "voyage" in (values.get("EMBEDDING_PROVIDER"), values.get("RERANK_PROVIDER")):
+        modules += list(MODULES_VOYAGE)
+    return modules
+
+
+def local_model_modules(values: dict, indexing: bool = False) -> List[str]:
+    """The modules of the local search models' packages, when this setup runs such a model.
+    The indexer embeds and never reranks, so with `indexing` they count only when the embedding
+    model is the local one; the MCP server needs them when either model is local."""
+    if indexing:
+        needed = needs_local_models(values) and values.get("EMBEDDING_PROVIDER") == "local"
+    else:
+        needed = needs_local_models(values)
+    return list(MODULES_LOCAL) if needed else []
+
+
+def modules_missing(modules, python: Optional[str] = None) -> Optional[List[str]]:
+    """Which of `modules` a Python can't find: the one running this wizard, or the one at the
+    path `python`. [] means it has them all. None means it could not be asked: it could not be
+    started, it crashed or it took too long.
+
+    A fresh copy of that Python answers, not this process, because that is how the indexer and
+    the MCP server will be started, because after this wizard's own pip run this process can
+    miss what a new one finds, and because it is the only way to ask another Python. It reads
+    nothing from the terminal, writes no files (-B) and changes nothing, so unlike run() it is
+    not shown as a "$" command.
+    """
+    modules = list(modules)
+    try:
+        done = subprocess.run([python or sys.executable, "-B", "-c", _PROBE] + modules, cwd=ROOT,
+                              stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=PROBE_TIMEOUT)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    lines = done.stdout.splitlines()
+    if done.returncode != 0 or f"checked {len(modules)}" not in lines:
+        return None
+    return [name for name in modules if f"missing {name}" in lines]
+
+
+def missing_packages(values: dict, python: Optional[str] = None, indexing: bool = False) -> Optional[List[str]]:
+    """What a Python still lacks for this setup, as the requirements files to install, in order:
+    [] when it has everything, None when it could not be asked. The Python is the one running
+    this wizard unless `python` gives another one's path. With `indexing`, only what the indexer
+    needs counts; otherwise everything the MCP server needs, which covers the indexer too."""
+    main, local = requirement_modules(values), local_model_modules(values, indexing)
+    absent = modules_missing(main + local, python)
+    if absent is None:
+        return None
+    return [name for name, modules in ((REQUIREMENTS, main), (REQUIREMENTS_LOCAL, local))
+            if set(modules) & set(absent)]
+
+
+def say_packages_state(values: dict, after_pip_error: bool = False) -> None:
+    """After an install that was skipped, or that failed: say plainly what the Python running
+    this wizard can do now. (An install that worked needs no comment.)"""
+    lacking = missing_packages(values)
+    this_python = paint(f"    {sys.executable}", BRAND)
+    if lacking is None:
+        say("  This wizard could not check whether this Python has Dewey's packages:")
+        say(this_python)
+        say("  Without them, the indexer, the MCP server and the demo page will not run with it.")
+    elif REQUIREMENTS in lacking:
+        say("  This Python does not have Dewey's packages yet:")
+        say(this_python)
+        say("  So the indexer, the MCP server and the demo page will not run with it.")
+    elif lacking:
+        fails = "indexing and searches" if values.get("EMBEDDING_PROVIDER") == "local" else "searches"
+        say("  This Python has Dewey's main packages, but not the ones for local search models")
+        say(f"  (PyTorch and {REQUIREMENTS_LOCAL}):")
+        say(this_python)
+        say(f"  So {fails} will fail with it.")
+    elif not after_pip_error:
+        say("  This Python already has Dewey's packages, so nothing needs installing.")
+    if after_pip_error:
+        say("  The packages may be only partly installed. To try again, run this wizard again.")
+        if python_verdict() != "ok":
+            say(f"  Dewey is not tested with Python {_dotted(sys.version_info)}. Python {_dotted(TESTED_PYTHON)} is "
+                "the safest choice: see Troubleshooting in docs/INSTALL.md.")
+    if lacking:
+        say('  "Next steps", at the end of this wizard, says what to do.')
+
+
 def install_dependencies(values: dict) -> None:
     heading("Install Python dependencies")
     if not in_virtualenv():
@@ -1139,18 +1274,25 @@ def install_dependencies(values: dict) -> None:
             say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
         say_lines(environment_steps(where))
         if not ask_yes("Install into the current Python anyway?", default=False):
+            say_packages_state(values)
             return
     pip = [sys.executable, "-m", "pip", "install"]
     if not ask_yes("Install requirements.txt now?", default=True):
+        say_packages_state(values)
         return
-    if not run(pip + ["-r", "requirements.txt"]):
-        say("  pip failed; see the output above.")
-        return
-    if needs_local_models(values):
+    installed = run(pip + ["-r", REQUIREMENTS])
+    if installed and needs_local_models(values):
         say("Local models need PyTorch (a large download).")
-        if ask_yes("Does this machine lack an NVIDIA GPU? (installs the smaller CPU-only PyTorch)", default=True):
-            run(pip + ["torch", "--index-url", LINKS["pytorch_cpu"]])
-        run(pip + ["-r", "requirements-local.txt"])
+        cpu_only = ask_yes("Does this machine lack an NVIDIA GPU? (installs the smaller CPU-only PyTorch)",
+                           default=True)
+        # If the CPU-only PyTorch can't be installed, stop there: requirements-local.txt would
+        # fetch the full build in its place, against the answer just given.
+        installed = ((not cpu_only or run(pip + ["torch", "--index-url", LINKS["pytorch_cpu"]]))
+                     and run(pip + ["-r", REQUIREMENTS_LOCAL]))
+    if not installed:
+        # pip's own output says why (a refusal to install outside a virtual environment included).
+        say("  pip stopped with an error. Its own message, above, says why.")
+        say_packages_state(values, after_pip_error=True)
 
 
 def is_loopback(host: Optional[str]) -> bool:
@@ -1469,17 +1611,81 @@ def report_import_review(docs: List[dict], plan: Optional["ImportPlan"] = None) 
     return not any(f.stop for f in findings)
 
 
-def index_archive(values: dict) -> None:
+def index_script(values: dict) -> str:
+    """The script that indexes the articles in data/ on this setup's stack."""
+    return "app/setup.py" if values.get("DEWEY_STACK") == "azure" else "app/setup_postgres.py"
+
+
+def index_reason(values: dict) -> str:
+    """Why indexing does not start when Enter is pressed, in one sentence for this setup."""
+    if values.get("DEWEY_STACK") == "azure":
+        what = "Indexing uploads every article to Azure, which embeds each one and bills for it"
+    elif values.get("EMBEDDING_PROVIDER") == "local":
+        what = "Indexing embeds every article on this computer, which can take a long time"
+    else:
+        what = "Indexing sends every article to Voyage AI, which bills per token"
+    return what + ", so it starts only if you type y."
+
+
+def index_archive(values: dict) -> str:
+    """Offer to index the articles in data/, and say how it went. Returns what happened, which
+    "Next steps" needs to know:
+
+      "no-data"      data/ has no .json files
+      "no-packages"  the Python running this wizard lacks what the indexer imports: not started
+      "declined"     Enter or n at "Index them now?"
+      "failed"       the indexer exited with an error
+      "stopped"      Control+C while it ran
+      "indexed"      it ran to its end
+    """
     heading("Index your archive")
     data = sorted((ROOT / "data").glob("*.json"))
     if not data:
-        say("No .json files in data/ yet. Add your articles there (format: docs/IMPORTING.md), then run:")
-    else:
-        say(f"Found {len(data)} JSON file(s) in data/.")
-    script = "app/setup.py" if values["DEWEY_STACK"] == "azure" else "app/setup_postgres.py"
-    say(f"  python {script}")
-    if data and ask_yes("Index them now?", default=False):
-        run([sys.executable, script])
+        say("No .json files in data/ yet, so there is nothing to index.")
+        return "no-data"
+    say(f"Found {len(data)} JSON file(s) in data/.")
+    azure = values.get("DEWEY_STACK") == "azure"
+    lacking = missing_packages(values, indexing=True)
+    if lacking:
+        # Started anyway, the indexer stops at its first import, or at the first article when
+        # only the local models' packages are missing.
+        if REQUIREMENTS in lacking:
+            say("The indexer cannot run with this Python, because it does not have Dewey's packages:")
+        else:
+            say("The indexer cannot run with this Python, because it lacks the packages for local search models")
+            say(f"(PyTorch and {REQUIREMENTS_LOCAL}):")
+        say(paint(f"  {sys.executable}", BRAND))
+        say('So this wizard has not started it. "Next steps", below, says what to do and has the command to index.')
+        return "no-packages"
+    if lacking is None:
+        say("This wizard could not check that this Python has Dewey's packages, which the indexer needs.")
+    say(index_reason(values))
+    if not ask_yes("Index them now?", default=False):
+        say('  Not indexed now. "Next steps", below, has the command for later.')
+        return "declined"
+    try:
+        finished = run([sys.executable, index_script(values)])
+    except KeyboardInterrupt:
+        # Control+C reached the indexer as well, and subprocess.run() has made sure it is gone.
+        # The Postgres indexer saves each article as soon as it is embedded, and starts from the
+        # first article every time (PgVectorStore.index_documents); app/setup.py uploads them all
+        # before Azure embeds any.
+        say()
+        if azure:
+            say("  app/setup.py was stopped before it finished. Running it again uploads every article again.")
+        else:
+            say("  Indexing was stopped before it finished. Articles indexed so far are kept, but running the")
+            say("  indexer again embeds every article again.")
+        return "stopped"
+    if not finished:
+        say('  The indexer stopped with an error; its own message is above. "Next steps", below, has the')
+        say("  command to run it again.")
+        return "failed"
+    if azure:
+        # app/setup.py prints its upload and indexer errors and still exits as a success.
+        say("  app/setup.py has finished. That alone does not mean every article reached Azure: read its output")
+        say("  above for lines containing Error or Failed (Build the search index, in docs/AZURE.md).")
+    return "indexed"
 
 
 # ---------------------------------------------------------------- archive import
@@ -2230,10 +2436,134 @@ def ask_mcp(cur: dict) -> dict:
     return {"DEWEY_MCP_TOKEN": secrets.token_urlsafe(32)}
 
 
-def print_mcp_next_steps() -> None:
-    py = sys.executable
+# ------------------------------------------------------------------ Next steps
+
+def dewey_venv_has_packages(values: dict, where: PythonSituation) -> bool:
+    """True when the Dewey folder has a working .venv that this wizard is not running in, and
+    its Python, asked now, has everything this setup needs: it only has to be turned on."""
+    return where.dewey_venv_is_off and missing_packages(values, str(venv_python())) == []
+
+
+def installs_here(where: PythonSituation) -> bool:
+    """True when the place to install Dewey's packages is the Python running this wizard: it is
+    in a virtual environment, and the Dewey folder has no environment of its own waiting to be
+    turned on. Otherwise they belong in the Dewey folder's .venv: nothing should send people to
+    install into their computer's own Python, or into another project's environment that was
+    left turned on."""
+    return bool(where.venv) and not where.dewey_venv_is_off
+
+
+def package_step(values: dict, lacking: List[str], where: PythonSituation) -> List[str]:
+    """The "get the packages" step of "Next steps", for a Python that lacks the requirements
+    files in `lacking`. The lines that start with two spaces are its commands.
+
+    Inside a virtual environment: pip, with that environment on (for the local search models,
+    the wizard again, because it asks which PyTorch fits). Otherwise (see installs_here()): the
+    shared lines that make or turn on the Dewey folder's environment and run the wizard there.
+    And when that environment already has everything, turning it on is all there is to do.
+    """
+    if dewey_venv_has_packages(values, where):
+        return (["Nothing needs installing: the Python running this wizard lacks packages Dewey needs, but the",
+                 "virtual environment in the Dewey folder has them. Use it for the commands below."]
+                + environment_steps(where, rerun=False))
+    if not installs_here(where):
+        return (["Install the packages Dewey needs in a virtual environment: run this wizard again in one, press",
+                 "Enter to keep each answer, and let it install them."]
+                + environment_steps(where))
+    lines: List[str] = []
+    local = f"the packages for local search models, PyTorch and {REQUIREMENTS_LOCAL}"
+    if REQUIREMENTS in lacking:
+        lines += ["Install the packages Dewey needs, with the virtual environment turned on:",
+                  f"  python -m pip install -r {REQUIREMENTS}"]
+    if REQUIREMENTS_LOCAL in lacking:
+        if lines:
+            lines += [f"Then run this wizard again and let it install {local}.",
+                      "It asks which PyTorch fits this computer:"]
+        else:
+            lines += [f"Install {local}, by running this wizard again.",
+                      "It asks which PyTorch fits this computer:"]
+        lines.append("  python install.py")
+    return lines
+
+
+def remaining_steps(values: dict, missing: List[str], indexing: str,
+                    where: Optional[PythonSituation] = None) -> List[List[str]]:
+    """What is left to do after this run, in the order to do it. Each step is a list of lines:
+    what it is for, then its commands, which start with two spaces and have a line to
+    themselves. `missing` is the settings still to fill in; `indexing` is what index_archive()
+    returned, or "no-settings" when it was not reached. An empty list means nothing is left.
+
+    The words between the commands are plain: no quotes, apostrophes, brackets or other
+    characters a shell acts on, in case someone pastes a whole step into a terminal.
+    """
+    where = where or python_situation()
+    steps: List[List[str]] = []
+    if missing:
+        steps.append([f"Fill in what is still missing: {', '.join(missing)}. Edit .env, or run this wizard again:",
+                      "  python install.py"])
+    lacking = missing_packages(values)
+    if lacking:  # not when the check could not be made: the MCP example below says so instead
+        steps.append(package_step(values, lacking, where))
+    if not any((ROOT / "data").glob("*.json")):
+        steps.append(["Get your articles into the data folder. docs/IMPORTING.md explains how. To list the importers:",
+                      f"  python {IMPORT_SCRIPT} --help"])
+    if indexing != "indexed":
+        title = {
+            "declined": "Index your archive, unless it is already indexed and the files in data/ have not changed:",
+            "failed": "Index your archive again, once the error above is fixed:",
+            "stopped": "Index your archive again, from the beginning:",
+        }.get(indexing, "Index your archive:")
+        steps.append([title, f"  python {index_script(values)}"])
+    return steps
+
+
+def say_steps(steps) -> None:
+    """Print the steps from remaining_steps(), numbered. Nothing is printed when none are left."""
+    for number, lines in enumerate(steps, 1):
+        say(f"{number}. {lines[0]}")
+        for line in lines[1:]:
+            say(paint("   " + line, BRAND) if line.startswith("  ") else "   " + line)
+
+
+def mcp_python(values: dict, where: Optional[PythonSituation] = None) -> Tuple[str, str]:
+    """The Python the MCP example should name, and how it was chosen:
+
+      "this"     the one running this wizard: it has everything the MCP server needs
+      "venv"     the Dewey folder's .venv Python, which has it all when this one does not
+      "none"     neither has it yet: the Python the "get the packages" step installs into
+                 (this one or the Dewey folder's .venv: see installs_here())
+      "unknown"  the one running this wizard, because the check could not be made
+    """
+    where = where or python_situation()
+    lacking = missing_packages(values)
+    if lacking is None:
+        return sys.executable, "unknown"
+    if not lacking:
+        return sys.executable, "this"
+    if dewey_venv_has_packages(values, where):
+        return str(venv_python()), "venv"
+    return (sys.executable if installs_here(where) else str(venv_python())), "none"
+
+
+def print_mcp_next_steps(values: dict, where: Optional[PythonSituation] = None) -> None:
+    where = where or python_situation()
+    py, how = mcp_python(values, where)
     server = ROOT / "app" / "mcp_server.py"
+    in_dewey_folder = "the Python of the virtual environment in the Dewey folder"
     say("Connect an AI tool (full recipes for each client: docs/MCP.md):")
+    # Which Python the two commands below name, whenever it is not simply "this one, which has
+    # the packages". Plain words, like the steps above: they sit between commands.
+    if how == "venv":
+        say(f"  The commands below name {in_dewey_folder}. It has the")
+        say("  packages Dewey needs, and the Python running this wizard does not have them all.")
+    elif how == "none":
+        named = "the Python running this wizard" if installs_here(where) else in_dewey_folder
+        say("  The commands below will not work until the packages Dewey needs are installed: see the steps above.")
+        say(f"  They name {named}, where those steps install them.")
+        say("  If you install them somewhere else, change command: and the HTTP command to that Python.")
+    elif how == "unknown":
+        say("  This wizard could not check that this Python has the packages Dewey needs. If your AI tool says the")
+        say("  server failed to start, change command: and the HTTP command to the Python that has them.")
     say("  On this computer (stdio), e.g. Hermes Agent's ~/.hermes/config.yaml:")
     say("    mcp_servers:")
     say("      dewey:")
@@ -2315,15 +2645,12 @@ def main() -> int:
         check_services(values)
     if postgres_stack:
         get_archive()  # importers need no keys or database, so this runs even with settings missing
-    if not missing:
-        index_archive(values)
+    indexing = index_archive(values) if not missing else "no-settings"
 
     heading("Next steps")
-    if missing:
-        say(f"1. Fill in: {', '.join(missing)} (re-run python install.py)")
-        if postgres_stack:
-            say("2. Index your archive:  python app/setup_postgres.py")
-    print_mcp_next_steps()
+    where = python_situation()
+    say_steps(remaining_steps(values, missing, indexing, where))
+    print_mcp_next_steps(values, where)
     say("Optional demo page (this computer only):  python app/main.py   then open http://127.0.0.1:7860")
     say("Before relying on answers, ask questions you already know the answers to and check")
     say("each citation against the article it links to.")

@@ -549,7 +549,10 @@ class InstallStepHintTests(unittest.TestCase):
                 mock.patch.object(install, "in_virtualenv", return_value=False), \
                 mock.patch.object(install, "python_situation", return_value=where), \
                 mock.patch("builtins.input", return_value="") as asked, \
+                mock.patch.object(install, "modules_missing", return_value=[]), \
                 mock.patch.object(install, "run", side_effect=AssertionError("Enter means no: nothing is installed")):
+            # modules_missing: after "no" the wizard says whether this Python has Dewey's packages
+            # (tests/install/test_packages.py); here it must not depend on the test runner's Python.
             install.install_dependencies({"DEWEY_STACK": "open"})
         self.assertEqual(asked.call_count, 1)
         self.assertIn("Install into the current Python anyway?", asked.call_args[0][0])

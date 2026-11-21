@@ -30,6 +30,7 @@ import import_archive  # noqa: E402
 from importers import IMPORTERS, common, drupal, ghost, wordpress_api  # noqa: E402
 from tests.importers import test_drupal, test_ghost  # noqa: E402
 from tests.importers.test_wordpress_api import APP_PASSWORD, APP_USER, FakeWordPress  # noqa: E402
+from tests.install.test_packages import make_environment  # noqa: E402
 
 try:
     import pexpect
@@ -239,15 +240,19 @@ class WizardImportTests(unittest.TestCase):
         (self.root / "data").mkdir()
         (self.root / "bin").mkdir()  # PATH: no ollama or docker, whatever this machine has
 
-    def wizard(self, script, *args):
+    def wizard(self, script, *args, python=None):
+        """Run the wizard with this script of (prompt to wait for, answer) pairs. `python` is the
+        Python to run it with, when that is not the one running the tests."""
         env = {k: v for k, v in os.environ.items()
                if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")
                and k not in ("WORDPRESS_USER", "WORDPRESS_APP_PASSWORD", "DRUPAL_USER", "DRUPAL_PASSWORD",
                              "GHOST_CONTENT_API_KEY")}
         env.update(PATH=str(self.root / "bin"), NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost",
                    PYTHONDONTWRITEBYTECODE="1")
+        if python is not None:
+            env.pop("PYTHONPATH", None)  # another Python must see its own packages only, not the test runner's
         transcript = io.StringIO()
-        child = pexpect.spawn(sys.executable, ["install.py", "--no-browser", *args], cwd=str(self.root),
+        child = pexpect.spawn(str(python or sys.executable), ["install.py", "--no-browser", *args], cwd=str(self.root),
                               env=env, encoding="utf-8", timeout=60, dimensions=(50, 200))
         child.logfile_read = transcript
         try:
@@ -395,6 +400,7 @@ class WizardImportTests(unittest.TestCase):
         self.assertIn(f"python app/import_archive.py wordpress-export --file {WXR_FIXTURE} --limit 20", out)
         self.assertNotIn("Imported ", out)
         self.assertNotIn("  $ ", out)  # no command was run
+        self.assertNotIn("Next steps", out)  # it stops before the steps that ask a Python about its packages
         self.assertEqual(self.data_files(), [])
         self.assertFalse((self.root / ".env").exists())
 
@@ -479,6 +485,106 @@ class WizardImportTests(unittest.TestCase):
         self.assertNotIn("made a new", mcp_step)
         self.assertEqual(self.env_token(), token)
         self.assertNotIn(token, out)
+
+    def wizard_in_its_own_environment(self, modules, *index_answers, install="n", runs_nothing=True):
+        """The wizard as the README has people run it: with the Python of a .venv in the Dewey
+        folder. This one is a throwaway (`python -m venv --without-pip`) holding only empty
+        packages named `modules`, so what the wizard finds there does not depend on what the
+        test runner's Python has installed. data/ holds one article file, the database question
+        is answered with an address nothing connects to, and `install` is the answer at
+        "Install requirements.txt now?" (no, unless a test says otherwise).
+        Returns (everything printed, what was printed under "Next steps"), without colour codes."""
+        python = make_environment(self.root / ".venv", modules)
+        (self.root / "data" / "mine.json").write_text("[]")
+        url = "postgresql://dewey:not-a-real-password@db.example.org:5432/archive"
+        script = (self.with_postgres_answers((self.POSTGRES, "yes"), ("Database URL", url))
+                  + [("Write this to .env", "y"), ("Install requirements.txt now", install)]
+                  + self.NO_CHECKS + [(self.WHERE, "")] + list(index_answers))
+        out, status = self.wizard(script, python=python)
+        out = re.sub(r"\x1b\[[0-9;]*m", "", out)  # a real terminal gets colours around commands and prompts
+        self.assertEqual(status, 0, out)
+        self.assertIn("Using the 1 JSON file(s) already in data/.", out)
+        if runs_nothing:
+            self.assertNotIn("  $ ", out)  # the wizard ran no command: not pip, not the indexer
+        self.assertIn("\u2500\u2500 Next steps ", out)
+        return out, out.rsplit("\u2500\u2500 Next steps ", 1)[1]
+
+    def test_a_python_without_dewey_packages_is_never_asked_to_index(self):
+        # Issue #19, boxes (b), (c) and (d), through a real terminal. The indexer used to be offered,
+        # and started, with a Python that stops at its first import.
+        out, next_steps = self.wizard_in_its_own_environment([])
+        install_step = out.split("Install Python dependencies", 1)[1].split("Get your archive into Dewey", 1)[0]
+        self.assertIn("This Python does not have Dewey's packages yet:", install_step)
+        self.assertIn(str(install.venv_python().relative_to(install.ROOT)), install_step)   # which Python
+        self.assertIn('"Next steps", at the end of this wizard, says what to do.', install_step)
+        self.assertNotIn("Index them now", out)
+        self.assertIn("The indexer cannot run with this Python", out)
+        # What is left, in order: the packages, then indexing. Each command on a line of its own.
+        self.assertRegex(next_steps, r"\n1\. Install the packages Dewey needs[^\r\n]*\r\n +python -m pip install -r "
+                                     r"requirements\.txt\r\n")
+        self.assertRegex(next_steps, r"\n2\. Index your archive:\r\n +python app/setup_postgres\.py\r\n")
+        self.assertNotRegex(next_steps, r"\n3\. ")
+        # The example names the Python the packages will be installed in, and says it is not ready.
+        self.assertRegex(next_steps, r'command: "[^"\r\n]*[/\\]\.venv[/\\][^"\r\n]*python[^"\r\n]*"')
+        self.assertIn("will not work until the packages Dewey needs are installed", next_steps)
+        self.assertRegex(next_steps, r"change command: and the HTTP\s+command")
+
+    def test_enter_at_index_them_now_leaves_the_command_in_next_steps(self):
+        # Box (c): No stays the default, the line above the question says why, and the command is
+        # listed afterwards.
+        modules = (install.requirement_modules({"DEWEY_STACK": "open"})
+                   + install.local_model_modules({"DEWEY_STACK": "open", "EMBEDDING_PROVIDER": "local"}))
+        self.assertIn("torch", modules)
+        out, next_steps = self.wizard_in_its_own_environment(modules, (r"Index them now\? \S*\(y/N\)", ""))
+        install_step = out.split("Install Python dependencies", 1)[1].split("Get your archive into Dewey", 1)[0]
+        self.assertIn("This Python already has Dewey's packages, so nothing needs installing.", install_step)
+        index_step = out.split("Index your archive", 1)[1].rsplit("\u2500\u2500 Next steps ", 1)[0]
+        self.assertIn("Found 1 JSON file(s) in data/.", index_step)
+        self.assertRegex(index_step, r"on this computer, which can take a long time, so it starts only if you type "
+                                     r"y\.\r\nIndex them now\?")
+        self.assertIn("Not indexed now.", index_step)
+        self.assertRegex(next_steps, r"\n1\. Index your archive, unless it is already indexed[^\r\n]*:\r\n +python "
+                                     r"app/setup_postgres\.py\r\n")
+        self.assertNotRegex(next_steps, r"\n2\. ")
+        for not_needed in ("requirements", "change command:", "will not work", "could not check"):
+            self.assertNotIn(not_needed, next_steps)
+        self.assertRegex(next_steps, r'command: "[^"\r\n]*[/\\]\.venv[/\\][^"\r\n]*python[^"\r\n]*"')
+
+    def test_a_pip_error_is_explained_and_the_wizard_carries_on(self):
+        # Box (b): a pip error used to get one line, "pip failed". Here pip really fails, and
+        # harmlessly: the throwaway environment was made without pip, so `python -m pip` stops at
+        # once with "No module named pip" and nothing can be downloaded or installed.
+        out, next_steps = self.wizard_in_its_own_environment([], install="", runs_nothing=False)
+        install_step = out.split("Install Python dependencies", 1)[1].split("Get your archive into Dewey", 1)[0]
+        self.assertRegex(install_step, r"\$ \S+ -m pip install -r requirements\.txt")   # the wizard did try
+        self.assertIn("No module named pip", install_step)                             # pip's own message
+        after_pip = install_step.split("No module named pip", 1)[1]
+        self.assertIn("pip stopped with an error. Its own message, above, says why.", after_pip)
+        self.assertIn("This Python does not have Dewey's packages yet:", after_pip)
+        self.assertIn("To try again, run this wizard again.", after_pip)
+        self.assertNotIn("Local models need PyTorch", install_step)   # nothing more is tried after the error
+        self.assertNotIn("Index them now", out)
+        self.assertIn("The indexer cannot run with this Python", out)
+        self.assertRegex(next_steps, r"\n1\. Install the packages Dewey needs")
+        self.assertRegex(next_steps, r"\n2\. Index your archive:\r\n +python app/setup_postgres\.py\r\n")
+
+    def test_control_c_while_the_indexer_runs_does_not_end_the_wizard(self):
+        # Box (c): a stopped index run used to end the wizard on the spot ("Cancelled"), so the
+        # command to index again was never shown. A stand-in indexer says it has started and
+        # then waits, as a long index run does; Control+C is typed while it waits.
+        (self.root / "app" / "setup_postgres.py").write_text(
+            'import time\nprint("STAND-IN INDEXER STARTED", flush=True)\ntime.sleep(300)\n')
+        modules = (install.requirement_modules({"DEWEY_STACK": "open"})
+                   + install.local_model_modules({"DEWEY_STACK": "open", "EMBEDDING_PROVIDER": "local"}))
+        out, next_steps = self.wizard_in_its_own_environment(
+            modules, (r"Index them now\? \S*\(y/N\)", "y"), ("STAND-IN INDEXER STARTED", "\x03"), runs_nothing=False)
+        self.assertRegex(out, r"\$ \S+ app/setup_postgres\.py")   # the wizard started it, with its own Python
+        self.assertNotIn("Cancelled", out)
+        index_step = out.split("STAND-IN INDEXER STARTED", 1)[1].rsplit("\u2500\u2500 Next steps ", 1)[0]
+        self.assertIn("Indexing was stopped before it finished.", index_step)
+        self.assertRegex(next_steps, r"\n1\. Index your archive again, from the beginning:\r\n +python "
+                                     r"app/setup_postgres\.py\r\n")
+        self.assertIn("mcp_servers:", next_steps)
 
 
     # --- the Postgres question (issue #5: none of its three answers but "later" had ever run in a test)
