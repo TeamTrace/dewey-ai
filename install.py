@@ -45,7 +45,7 @@ from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
-MIN_PYTHON = (3, 11)  # README badge: Python 3.11+
+MIN_PYTHON = (3, 11)  # README badge and docs/INSTALL.md: Python 3.11-3.13
 
 # Where users get each account or tool. Sources: Anthropic's embeddings guide
 # (Voyage keys come from MongoDB Atlas), Ollama's README, pgvector's README.
@@ -57,6 +57,9 @@ LINKS = {
     "pgvector": "https://github.com/pgvector/pgvector#installation",
     "docker": "https://docs.docker.com/get-started/get-docker/",
     "pytorch_cpu": "https://download.pytorch.org/whl/cpu",
+    # 3.13.17, the newest 3.13 with Mac and Windows installers. Not python.org's big Download
+    # button: in November 2026 that offered 3.15, which can't install Dewey (voyageai needs < 3.15).
+    "python": "https://www.python.org/downloads/release/python-31317/",
 }
 PGVECTOR_DOCKER_IMAGE = "pgvector/pgvector:pg18"  # tag list: pgvector README, Docker section
 PGVECTOR_CONTAINER = "dewey-db"  # the container name the Postgres step suggests
@@ -486,7 +489,11 @@ def ask_postgres(cur: dict, interactive: bool) -> dict:
         say("  - your own Postgres server, with the pgvector extension installed")
         say("  - a managed Postgres that offers pgvector (Neon, Supabase, Fly, ...)")
         say(f"  - Docker on this machine: {PGVECTOR_DOCKER_IMAGE}")
-        say("    or, with Homebrew Postgres on macOS: brew install pgvector")
+        say("  - PostgreSQL 18 and pgvector installed on this machine (see 'Postgres with pgvector'")
+        say("    in docs/STACKS.md for the other steps):")
+        say("      macOS on Apple silicon, with Homebrew:  brew install postgresql@18 pgvector")
+        say("      Debian or Ubuntu:  postgresql-18-pgvector, from PostgreSQL's own apt repository")
+        say("      Fedora:  sudo dnf install postgresql-server pgvector")
         if not have_docker:
             offer_link("Docker isn't installed; get Docker", LINKS["docker"], interactive)
         offer_link("pgvector installation guide", LINKS["pgvector"], interactive)
@@ -549,8 +556,9 @@ def install_dependencies(values: dict) -> None:
     heading("Install Python dependencies")
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
     if not in_venv:
-        say("You're not in a virtual environment. The README recommends one:")
-        say("  python -m venv .venv && source .venv/bin/activate   (Windows: .venv\\Scripts\\activate)")
+        say("You're not in a virtual environment. docs/INSTALL.md explains how to make one:")
+        say("  python3.13 -m venv .venv && source .venv/bin/activate")
+        say("  (Windows: py -3.13 -m venv .venv, then .venv\\Scripts\\Activate.ps1)")
         say("then re-run: python install.py")
         if not ask_yes("Install into the current Python anyway?", default=False):
             return
@@ -827,7 +835,7 @@ def index_archive(values: dict) -> None:
     heading("Index your archive")
     data = sorted((ROOT / "data").glob("*.json"))
     if not data:
-        say("No .json files in data/ yet. Add your articles there (format in the README), then run:")
+        say("No .json files in data/ yet. Add your articles there (format: docs/IMPORTING.md), then run:")
     else:
         say(f"Found {len(data)} JSON file(s) in data/.")
     script = "app/setup.py" if values["DEWEY_STACK"] == "azure" else "app/setup_postgres.py"
@@ -910,7 +918,19 @@ def importer_env(plan: ImportPlan) -> Dict[str, str]:
 
 
 def read_secret_line(name: str) -> str:
-    return f"read -rs {name} && export {name}   # paste it, press Enter; it isn't shown or saved"
+    """The shell line that sets a secret without showing it: the command only.
+
+    How to use it is printed on its own line (READ_SECRET_NOTE). A trailing `# note`
+    isn't a comment in an interactive zsh (macOS's default shell), and an apostrophe in
+    one opens a quote that echoes the pasted secret and saves it in the shell history.
+    """
+    return f"read -rs {name} && export {name}"
+
+
+# Printed before lines from read_secret_line(). Plain words only (no quotes, ; or #), so
+# it does no harm if someone copies it into a terminal along with the commands below it.
+READ_SECRET_NOTE = ("Run the read line on its own, then paste the password or key and press Enter.",
+                    "Nothing is shown or saved.")
 
 
 def path_from_input(raw: str) -> Path:
@@ -1221,17 +1241,22 @@ def json_snapshot(folder: Path) -> Dict[str, int]:
 def show_import_commands(plan: ImportPlan, trial: bool = False, again: bool = False) -> None:
     say()
     say(f"To run this import{' again' if again else ''} later, from the Dewey folder ({ROOT}):")
+    if os.name != "nt" and any(line.startswith("read -rs ") for line in plan.env_lines):
+        for note in READ_SECRET_NOTE:  # Windows gets its own note below instead
+            say(note)
     for line in plan.env_lines:
         say("  " + line)
     if trial:
-        say("  " + shell_join(importer_command(plan, TRIAL_LIMIT)) + "   # trial run")
+        say(f"A trial run of {TRIAL_LIMIT} articles first:")
+        say("  " + shell_join(importer_command(plan, TRIAL_LIMIT)))
+        say("Then everything:")
     say("  " + shell_join(importer_command(plan)))
     if plan.env_lines and os.name == "nt":
         say("  (Windows: set those environment variables in your terminal instead of using export/read;")
         say("  never put the password or key on the command line.)")
     say("Re-running reads everything again and replaces the files from the last run of the same")
     say("import. Stories deleted or unpublished in your CMS stay in Dewey's index until you rebuild")
-    say("it (see 'Importing your archive' in the README).")
+    say("it (see 'Not handled yet' in docs/IMPORTING.md).")
 
 
 def offer_trial_cleanup(files) -> None:
@@ -1270,7 +1295,7 @@ def get_archive(dry_run: bool = False) -> None:
         if existing:
             say(f"Using the {len(existing)} JSON file(s) already in data/.")
         else:
-            say("data/ has no .json files yet. Put your article files there (format in the README).")
+            say("data/ has no .json files yet. Put your article files there (format: docs/IMPORTING.md).")
         return
 
     prev: Optional[ImportPlan] = None
@@ -1410,8 +1435,8 @@ def print_mcp_next_steps() -> None:
     say(f'        args: ["{server}"]')
     say("        tools:")
     say("          include: [search_archive]")
-    say("  Over HTTP (shared server):")
-    say(f"    {py} {server} --http        # listens on 127.0.0.1:8765")
+    say("  Over HTTP (shared server). This listens on 127.0.0.1:8765:")
+    say("    " + shell_join([py, str(server), "--http"]))
     say('    clients send  Authorization: Bearer <DEWEY_MCP_TOKEN from .env>  to http://127.0.0.1:8765/mcp')
     say("  Put TLS in front before exposing it beyond this machine (docs/DEPLOYMENT.md).")
 
@@ -1430,8 +1455,12 @@ def main() -> int:
     say("This walks you through choosing a stack, getting any accounts and keys it needs,")
     say("and writing your .env file. Secrets are typed hidden and stored only in .env.")
     if sys.version_info < MIN_PYTHON:
-        say(f"\nDewey needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+; this is {sys.version.split()[0]}. "
-            "Install a newer Python from https://www.python.org/downloads/ and re-run.")
+        say(f"\nDewey needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} to 3.13; this is {sys.version.split()[0]}.")
+        say("On a Mac or Windows, install Python 3.13 from")
+        say("  " + paint(LINKS["python"], BRAND, UNDERLINE))
+        say("On Linux, use your package manager (Python 3.11, 3.12 and 3.13 all work).")
+        say("A .venv folder made with this older Python won't work: delete it, make it again")
+        say("with the new Python, then re-run python install.py. docs/INSTALL.md shows each step.")
         return 1
 
     current = read_env(ENV_PATH)

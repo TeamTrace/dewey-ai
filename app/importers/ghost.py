@@ -103,7 +103,9 @@ large archives:
   settings); each date window gets its own output files.
 
 examples:
-  read -rs {KEY_ENV} && export {KEY_ENV}   # paste it; not shown or saved
+  After the read line, paste the Content API key and press Enter.
+  Nothing is shown or saved.
+  read -rs {KEY_ENV} && export {KEY_ENV}
   python app/import_archive.py ghost --url https://www.example.com --limit 20
   python app/import_archive.py ghost --url https://example.ghost.io \\
       --after 2023-01-01 --before 2024-01-01

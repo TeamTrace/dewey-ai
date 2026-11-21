@@ -26,11 +26,12 @@ demo. Docs are for newsrooms of any technical level: plain, and honest about lim
 - `app/models/`: config dataclasses (`NewsroomConfig` reads `NEWSROOM_NAME`, `ARCHIVE_START_DATE`, `DEFAULT_REGION`) and the Pydantic `SearchMetadata` schema used for Claude structured outputs.
 - `app/setup.py` + `app/setup/`: Azure index, skillset and indexer setup. `app/setup_postgres.py`: Postgres schema and indexing (upserts only; never deletes articles).
 - `app/import_archive.py` + `app/importers/`: archive importers, standard library only, writing article JSON to `data/`. One module per source, each with `NAME`, `HELP`, `add_arguments`, `default_prefix`, `iter_articles` (listed in `importers/__init__.py`): `wordpress_api`, `wordpress_export`, `feed`, `csv_import`, `drupal` (beta), `ghost` (beta). `common.py` has normalization, `ArticleWriter` (atomic replace of `<prefix>-NNNN.json`; `--limit` runs write `<prefix>-sample-*`), the `ImportReport` and credential-safe HTTP.
-- `data/*.json`: articles to index (see README for the format).
-- `tests/`: stdlib `unittest`. `tests/importers/` (fake sites on 127.0.0.1, fixtures in `tests/importers/fixtures/`), `tests/install/` (drives `install.py` through a pty with pexpect, against a temp copy of the repo; skipped without pexpect), `tests/providers/` (`build_where`; the real-Postgres tests run only when `DEWEY_TEST_DATABASE_URL` is set, building the real `schema_sql()` in a private schema they drop afterwards).
-- `.github/workflows/tests.yml`: CI on pull requests and pushes to main, Python 3.11 and 3.12: ruff (F rules) + the unittest suite. No secrets, network or Postgres needed.
+- `data/*.json`: articles to index (format: docs/IMPORTING.md).
+- `tests/`: stdlib `unittest`. `tests/importers/` (fake sites on 127.0.0.1, fixtures in `tests/importers/fixtures/`), `tests/install/` (drives `install.py` through a pty with pexpect, against a temp copy of the repo; skipped without pexpect), `tests/providers/` (`build_where`; the real-Postgres tests run only when `DEWEY_TEST_DATABASE_URL` is set, building the real `schema_sql()` in a private schema they drop afterwards), `tests/docs/` (link, anchor and paste-safety checks for `README.md` and `docs/*.md`, and for commands `install.py` and the importers print).
+- `.github/workflows/tests.yml`: CI on pull requests and pushes to main, Python 3.11, 3.12 and 3.13: ruff (F rules) + the unittest suite. No secrets, network or Postgres needed.
 - `install.py` (repo root): interactive setup wizard that writes `.env`. Standard library only, because it runs before dependencies are installed. Its `SECTIONS` list must stay in sync with the settings read in `app/providers/__init__.py` and `app/models/core.py`. On the Postgres stacks its "Get your archive into Dewey" step runs an importer as a subprocess (`sys.executable app/import_archive.py ...`), a `--limit 20` trial first; `--dry-run` only prints the commands.
 - Deployment: `Dockerfile` (python:3.12-slim, non-root uid 1000, `INSTALL_LOCAL_MODELS` build arg; default command is the MCP server on `0.0.0.0:8765`, TCP healthcheck), `docker-compose.yml` (`dewey` = MCP server, published on `127.0.0.1:8765` only, `DEWEY_MCP_TOKEN` required via `${...:?}`, alias `dewey-mcp` on the fixed-name `dewey-mcp-clients` network for chat-UI containers; `db` = `pgvector/pgvector:pg18`, never published and not on that network; `demo` profile = Gradio page on `127.0.0.1:7860`; `ollama` profile; the indexer is `docker compose run --rm -v ./data:/app/data:ro dewey python app/setup_postgres.py`), `deploy/fly.toml.example` and `deploy/render.yaml.example` (MCP server + database only; TCP health checks because `/mcp` answers 401 without the token), guides in `docs/DEPLOYMENT.md` and `docs/MCP.md`. Platform and client claims in those guides link to the source they were checked against (GitHub-hosted docs or source), or are marked unverified. Tests: `tests/deploy/` (runs `docker compose config` when the docker CLI is installed; no daemon needed).
+- Docs: `README.md` is the front door; the guides are `docs/INSTALL.md` (install and first run on macOS, Windows and Linux), `docs/STACKS.md` (the five setups side by side, described rather than recommended), `docs/IMPORTING.md` (importers, the article file format, indexing), `docs/AZURE.md` (the `azure` stack), `docs/MCP.md` (connecting AI tools), `docs/DEPLOYMENT.md` (servers and hosting), `docs/MODELS.md` (chat models on `open`) and `docs/GLOSSARY.md` (terms, linked on first use). Facts about Dewey in them come from the code; claims about other products link to their source or are marked unverified.
 
 ## Conventions
 
@@ -49,16 +50,20 @@ demo. Docs are for newsrooms of any technical level: plain, and honest about lim
 - No login system. Don't add accounts or auth to the demo page or the MCP server beyond the bearer token: access control is `DEWEY_MCP_TOKEN` + TLS in front + network placement (never publish Postgres; Compose publishes ports on 127.0.0.1 only), and chat apps decide which of their users get the tool. The demo page stays on loopback unless one of the two `DEWEY_DEMO_*` flags says otherwise. Never print or log the token.
 - Never write to stdout from `dewey.py`, `providers/`, `tools/` or `models/`: in the MCP server's stdio mode, stdout is the JSON-RPC channel and one stray line breaks the client. Use `print(..., file=sys.stderr)` or `logging`. `mcp_server.py` also runs tool calls with stdout redirected to stderr as a backstop; `tests/mcp/test_stdio.py` checks that every stdout line is JSON-RPC.
 - Importers never invent data (no placeholder bylines or dates; skipped items are counted in the report) and never put secrets in argv. Logins and keys come from `WORDPRESS_USER`/`WORDPRESS_APP_PASSWORD`, `DRUPAL_USER`/`DRUPAL_PASSWORD`, `GHOST_CONTENT_API_KEY`; `install.py` reads them with getpass and passes them in the subprocess environment (`IMPORTER_ENV`), and printed commands show `read -rs NAME` placeholders. A new secret flag must be added to `install.SECRET_FLAGS` (a test checks this).
+- Shell commands in the docs, and commands Dewey prints for people to copy (`install.py`, the importers' `--help`), must paste safely into an interactive zsh (macOS's default shell): no `#` comments (zsh passes them along as words, and an apostrophe in one opens a quote), CAPITALS for placeholders, quotes around anything with `[ ]` or `?` (single quotes if it has `!`), and explanations on a line of their own. `tests/docs/test_docs.py` checks this.
 
 ## Checks
 
-Before committing (CI runs the lint and test lines):
+Before committing (CI runs the lint and test lines). Keep `-t .` on the test line: without it,
+`tests/importers` and `tests/mcp` shadow `app/importers` and the `mcp` SDK. Run the Compose line
+with `POSTGRES_PASSWORD` and `DEWEY_MCP_TOKEN` set, and never without `--quiet`, which stops it
+printing `.env`'s secrets (`tests/deploy` also runs it against a fake `.env`).
 
 ```bash
 ruff check app/ install.py tests/ --select F
-python -m unittest discover -s tests -t .   # keep -t .: without it, tests/importers and tests/mcp shadow app/importers and the mcp SDK
+python -m unittest discover -s tests -t .
 python -c "import sys; sys.path.insert(0, 'app'); import dewey, providers, mcp_server"
-docker compose config --quiet   # with POSTGRES_PASSWORD and DEWEY_MCP_TOKEN set; without --quiet it prints .env's secrets. tests/deploy also runs it against a fake .env
+docker compose config --quiet
 ```
 
 Tests must not need network access, API keys or Postgres: use fake servers on 127.0.0.1, and gate anything needing a real database on `DEWEY_TEST_DATABASE_URL` (skip with a reason otherwise).
