@@ -2563,7 +2563,8 @@ def package_step(values: dict, lacking: List[str], where: PythonSituation, wizar
     files in `lacking`. The lines that start with two spaces are its commands.
 
     Inside a virtual environment: pip, with that environment on (for the local search models,
-    the wizard again, because it asks which PyTorch fits). Otherwise (see installs_here()): the
+    the wizard again, because it asks which PyTorch fits, after a yes at its requirements.txt
+    question). Otherwise (see installs_here()): the
     shared lines that make or turn on the Dewey folder's environment and run the wizard there.
     And when that environment already has everything, turning it on is all there is to do,
     unless `wizard_again` says the wizard has to run there anyway, for settings still missing.
@@ -2575,9 +2576,13 @@ def package_step(values: dict, lacking: List[str], where: PythonSituation, wizar
                  "virtual environment in the Dewey folder has them. Use it for the commands below."]
                 + environment_steps(where, rerun=wizard_again))
     if not installs_here(where):
-        return (["Install the packages Dewey needs in a virtual environment: run this wizard again in one, press",
-                 "Enter to keep each answer, and let it install them."]
-                + environment_steps(where))
+        step = ["Install the packages Dewey needs in a virtual environment: run this wizard again in one, press",
+                "Enter to keep each saved answer, and let it install them."]
+        if values.get("DEWEY_STACK") in ("anthropic", "open") and not values.get("DATABASE_URL"):
+            # Enter keeps what is saved, and an earlier "later" at the Postgres question saved nothing.
+            step += ["No database address is saved yet, so the Postgres question starts again: Enter there picks its",
+                     "suggested answer, not your earlier one. Say that the database is running only once it is."]
+        return step + environment_steps(where)
     lines: List[str] = []
     local = f"the packages for local search models, PyTorch and {REQUIREMENTS_LOCAL}"
     go = [] if where.in_root else ["First, go to the Dewey folder:", "  cd " + _typed(where.system, where.root)]
@@ -2586,13 +2591,16 @@ def package_step(values: dict, lacking: List[str], where: PythonSituation, wizar
         lines += ([turned_on + "."] + go + ["Then install them:"]) if go else [turned_on + ":"]
         lines.append(f"  python -m pip install -r {REQUIREMENTS}")
     if REQUIREMENTS_LOCAL in lacking:
+        # The wizard asks about PyTorch only after a yes at its requirements.txt question, so say
+        # which answer brings that question: someone who has just installed that file would say no.
         if lines:
             lines += [f"Then run this wizard again and let it install {local}.",
-                      "It asks which PyTorch fits this computer:"]
+                      f"Press Enter at its question about {REQUIREMENTS}, even though that file is installed by then."]
         else:
             lines += ([f"Install {local}, by running this wizard again."] + go
-                      + ["It asks which PyTorch fits this computer:"])
-        lines.append("  python install.py")
+                      + [f"Press Enter at its question about {REQUIREMENTS}, even though that file is already installed."])
+        lines += ["Only after a yes there does it ask which PyTorch fits this computer:",
+                  "  python install.py"]
     return lines
 
 
@@ -2615,8 +2623,13 @@ def remaining_steps(values: dict, missing: List[str], indexing: str,
     in_package_step = bool(lacking) and not installs_here(where)
     if missing:
         fill = f"Fill in what is still missing: {', '.join(missing)}. Edit .env, or "
-        steps.append([fill + "type what is missing when you run this wizard again in step 2."] if in_package_step
-                     else [fill + "run this wizard again:", "  python install.py"])
+        # A Claude sign-in that is missing or damaged is listed as ANTHROPIC_API_KEY; typing a key is
+        # only one way to fix it, and the Summary has printed the other.
+        claude = (["A working Claude sign-in also counts for ANTHROPIC_API_KEY. The Summary above says what to do."]
+                  if "ANTHROPIC_API_KEY" in missing else [])
+        steps.append([fill + "type what is missing when you run this wizard again in step 2."] + claude
+                     if in_package_step
+                     else [fill + "run this wizard again:"] + claude + ["  python install.py"])
     if lacking:
         steps.append(package_step(values, lacking, where, wizard_again=bool(missing)))
     if not any((ROOT / "data").glob("*.json")):

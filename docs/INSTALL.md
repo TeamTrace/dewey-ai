@@ -843,9 +843,11 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 14. **Install Python dependencies.** Press Enter at `Install requirements.txt now? (Y/n):` (the `$` lines are commands it runs itself: don't type them). For local search models, answer the double negative `Does this machine lack an NVIDIA GPU?` with `Y` on a Mac or Windows. On Linux, answer `Y` unless you have an NVIDIA RTX 20 or GTX 16 series card or newer with driver 580 or newer ([details](STACKS.md#local-search-models)).
 
-    If it says `You're not in a virtual environment.` instead, press Enter (no) at `Install into the current Python anyway? (y/N):`. Unless that Python happens to have Dewey's packages, the wizard then says `This Python does not have Dewey's packages yet`, doesn't offer to index, and lists what to do under Next steps. Your answers are already in `.env`: let it finish (importing works without the packages) or press Control+C, then [turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each answer.
+    If it says `You're not in a virtual environment.` instead, press Enter (no) at `Install into the current Python anyway? (y/N):`. Unless that Python happens to have Dewey's packages, the wizard then says `This Python does not have Dewey's packages yet`, doesn't offer to index, and lists what to do under Next steps. Your answers are already in `.env`: let it finish (importing works without the packages) or press Control+C, then [turn the environment on](#turn-it-on-in-every-new-terminal-window), run the wizard again and press Enter to keep each saved answer. One answer is not kept: until a database address is saved (`later`, or `n` at `Is it running?`, saves none), Enter at the Postgres question picks the wizard's suggested answer again, which is `docker` when it finds Docker. Answer that question again, and say the database is running only once it is.
 
     If you answer `n` at `Install requirements.txt now?`, the wizard says the same about this Python, or `This Python already has Dewey's packages` when there was nothing to install. If pip fails, it says `pip stopped with an error`: pip's own message, just above that line, says why ([Troubleshooting](#troubleshooting) has the common ones). To try again, run the wizard again.
+
+    With local search models, press Enter at `Install requirements.txt now?` even when `requirements.txt` is already installed: the wizard asks about PyTorch only after a yes there.
 
 15. **Check credentials and services** (only when nothing is missing): a result for each service ([what to look for](#check-that-it-worked)). It skips a Voyage key (checking "would make a billed API call") and Azure. For an `ant auth login` sign-in it prints `Claude sign-in: not checked`: it tests only an API key.
 
@@ -890,7 +892,7 @@ Your computer's section and the wizard's screens give the other download sizes.
 
 ### If you stop halfway
 
-- **Control+C** stops the wizard at any question (`Cancelled; nothing further was changed.`). Nothing is saved before `Write this to .env?`; after it, re-run the wizard and press Enter to keep each answer.
+- **Control+C** stops the wizard at any question (`Cancelled; nothing further was changed.`). Nothing is saved before `Write this to .env?`; after it, re-run the wizard and press Enter to keep each saved answer (the Postgres question starts again if no database address was saved: see step 14).
 - **Stopping an import** leaves `data/` as it was. **Stopping the indexer** keeps finished articles, but re-running it embeds every article again (time, or money with Voyage AI).
 - **Stopping after starting the Docker database,** before answering `Y`, leaves its password unsaved ([Troubleshooting](#troubleshooting): "The database container already exists").
 

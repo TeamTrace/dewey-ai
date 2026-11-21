@@ -788,6 +788,45 @@ class NextStepsTests(TempRootTestCase):
         self.assertIn("local search models", words(step))
         self.assertIn("requirements-local.txt", words(step))
 
+    def test_the_local_model_step_says_which_answer_brings_the_pytorch_question(self):
+        # The wizard asks about PyTorch only after a yes at "Install requirements.txt now?". Someone
+        # who has just installed that file by hand would answer no, and never be asked.
+        self.articles()
+        for here in (EVERYTHING, LOCAL_MODEL_MODULES):
+            with self.subTest(here=here):
+                (step, _) = self.steps(OPEN_LOCAL, where=computer("dewey"), here=here)
+                self.assertIn("Press Enter at its question about requirements.txt", words(step))
+                self.assertIn("Only after a yes there does it ask which PyTorch fits this computer", words(step))
+                self.assertEqual(step[-1], "  python install.py")
+
+    def test_a_rerun_is_told_that_enter_keeps_only_what_is_saved(self):
+        # An earlier "later" at the Postgres question saves no address, so on the next run Enter
+        # there picks the suggested answer (docker, where Docker is installed), not "later" again.
+        self.articles()
+        note = "No database address is saved yet"
+        for values in (OPEN_LOCAL, CLAUDE_VOYAGE, dict(OPEN_LOCAL, DATABASE_URL="")):
+            with self.subTest(values=values):
+                (step, _) = self.steps(values, where=computer("none"), here=EVERYTHING)
+                self.assertIn("press Enter to keep each saved answer", words(step))
+                self.assertIn(note, words(step))
+        saved = dict(OPEN_LOCAL, DATABASE_URL="postgresql://dewey:pw@db.invalid:5432/dewey")
+        for values in (saved, AZURE):
+            with self.subTest(values=values.get("DEWEY_STACK")):
+                (step, _) = self.steps(values, where=computer("none"), here=EVERYTHING)
+                self.assertNotIn(note, words(step))
+
+    def test_a_missing_claude_credential_points_back_to_the_summary(self):
+        # A missing or damaged sign-in is listed as ANTHROPIC_API_KEY; pasting a key is one fix,
+        # and the Summary has just printed the other.
+        self.articles()
+        for where, here in ((computer("dewey"), ()), (computer("none"), EVERYTHING)):
+            with self.subTest(where=where):
+                steps = self.steps(CLAUDE_VOYAGE, missing=["ANTHROPIC_API_KEY"], indexing="no-settings",
+                                   where=where, here=here)
+                self.assertIn("A working Claude sign-in also counts for ANTHROPIC_API_KEY", words(steps[0]))
+        steps = self.steps(CLAUDE_VOYAGE, missing=["DATABASE_URL"], indexing="no-settings")
+        self.assertNotIn("Claude sign-in", words(steps[0]))
+
     def test_the_pip_commands_start_in_the_dewey_folder_when_the_terminal_is_somewhere_else(self):
         # `-r requirements.txt` and `python install.py` are relative. The other forms of this step
         # begin with `cd`; this one used to leave it out.
@@ -866,7 +905,7 @@ class NextStepsTests(TempRootTestCase):
                 self.assertEqual(step[-len(shared):], shared)       # the same lines as the install step's hint
                 self.assertEqual(step[-1], "  python install.py")
                 self.assertNotIn("pip install", "\n".join(step[:-len(shared)]))
-                self.assertIn("press Enter to keep each answer", words(step))
+                self.assertIn("press Enter to keep each saved answer", words(step))
         self.assertEqual(self.asked.call_count, 2)   # this Python, then the .venv that is there
 
     def test_a_dot_venv_that_already_has_the_packages_only_has_to_be_turned_on(self):
