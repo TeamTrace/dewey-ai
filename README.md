@@ -113,7 +113,7 @@ Six steps get Dewey running on one computer. If any of this is new to you, follo
    ```bash
    python install.py
    ```
-   It asks for your setup's stack and search models ([what to answer](docs/INSTALL.md#which-setup-to-choose)), shows where to get any accounts and [keys](docs/GLOSSARY.md#api-key), and hides secrets as you type them. It saves your settings in `.env`, a [settings file](docs/GLOSSARY.md#env-file) in the Dewey folder. It can also install Dewey's packages, import your archive (on most setups) and index it. **When it asks `Index them now?`, type `y`:** the default is No.
+   It asks for your setup's stack and search models ([what to answer](docs/INSTALL.md#which-setup-to-choose)), shows where to get any accounts and [keys](docs/GLOSSARY.md#api-key), and hides secrets as you type them. On a first run it marks `anthropic` "(suggested)" at the stack question: that's only what Enter picks, not a recommendation. A `.env` written by hand with no `DEWEY_STACK` line runs `azure` instead ([details](docs/STACKS.md#what-every-setup-has-in-common)). It saves your settings in `.env`, a [settings file](docs/GLOSSARY.md#env-file) in the Dewey folder. It can also install Dewey's packages, import your archive (on most setups) and index it. **When it asks `Index them now?`, type `y`:** the default is No.
 
    On Windows, some commands the wizard prints work only on Mac and Linux (a known problem: [#25](https://github.com/TeamTrace/dewey-ai/issues/25)); the install guide's [wizard section](docs/INSTALL.md#what-the-wizard-asks) gives PowerShell versions.
 

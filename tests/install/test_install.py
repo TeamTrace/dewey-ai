@@ -450,6 +450,36 @@ class WizardImportTests(unittest.TestCase):
         self.assertEqual(self.env_token(), token)
         self.assertNotIn(token, out)
 
+    def test_first_run_marks_nothing_current_and_says_the_token_is_new(self):
+        # Issue #19, boxes (e) and (f), through a real terminal. \S* allows for the colour codes
+        # a terminal gets between a value and its mark.
+        out, status = self.wizard(self.OPEN_STACK + self.WRITE_ENV + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("(current)", out)   # nothing is saved yet, so nothing is "current"
+        self.assertRegex(out, r"anthropic\S* \(suggested\)")
+        self.assertRegex(out, r"local\S* \(suggested\)")
+        mcp_step = out.split("Connect AI tools (MCP)", 1)[1].split("Summary", 1)[0]
+        self.assertIn("This run made a new token.", mcp_step)
+        self.assertIn("will be saved in .env", mcp_step)
+        self.assertIn("DEWEY_MCP_TOKEN", mcp_step)
+        self.assertIn("(stdio) do not need it", mcp_step)
+        token = self.env_token()
+        self.assertGreaterEqual(len(token or ""), 32)
+        self.assertNotIn(token, out)
+
+        # The re-run finds those answers in .env: now they are "current", and the token is kept.
+        rerun = self.OPEN_STACK + [("Keep the existing MCP token", "")] + self.WRITE_ENV
+        out, status = self.wizard(rerun + [(self.WHERE, "skip")])
+        self.assertEqual(status, 0, out)
+        for saved in ("open", "local", "none"):
+            self.assertRegex(out, rf"{saved}\S* \(current\)")
+        self.assertNotRegex(out, r"anthropic\S* \((suggested|current)\)")
+        mcp_step = out.split("Connect AI tools (MCP)", 1)[1].split("Summary", 1)[0]
+        self.assertIn("Kept the token", mcp_step)
+        self.assertNotIn("made a new", mcp_step)
+        self.assertEqual(self.env_token(), token)
+        self.assertNotIn(token, out)
+
 
     # --- the Postgres question (issue #5: none of its three answers but "later" had ever run in a test)
 

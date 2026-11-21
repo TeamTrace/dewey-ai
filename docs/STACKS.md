@@ -45,7 +45,7 @@ In every setup, your AI tool's own model also receives the [excerpts](GLOSSARY.m
 
 All five share the [importers](GLOSSARY.md#importer) and article files ([IMPORTING.md](IMPORTING.md#how-importing-works)), the [MCP server](GLOSSARY.md#mcp-server) and its two tools ([MCP.md](MCP.md#the-two-tools)), the demo page and the setup wizard. `search_archive`, the tool Dewey suggests, calls no chat model: your AI tool's own model writes the answer. So the chat model only serves `ask_archive` and the demo page, though the MCP server needs its settings to start.
 
-Dewey runs `azure` when `DEWEY_STACK` isn't set, which makes it the *default*. On a first run, the setup wizard has `anthropic` selected, marked "(current)", which isn't a recommendation. It always writes `DEWEY_STACK` to your [`.env` file](GLOSSARY.md#env-file).
+Dewey runs `azure` when `DEWEY_STACK` isn't set, which makes it the *default*. The setup wizard always writes `DEWEY_STACK` to your [`.env` file](GLOSSARY.md#env-file), so that default only matters for a `.env` written by hand. On a first run the wizard's list starts at `anthropic`, marked "(suggested)": Enter picks it, but it isn't a recommendation. On later runs, "(current)" marks the stack saved in `.env`.
 
 <details>
 <summary>How each stack handles each step</summary>

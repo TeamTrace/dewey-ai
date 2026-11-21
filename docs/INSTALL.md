@@ -752,7 +752,7 @@ Answer from your setup's row (a dash means the wizard doesn't ask):
 | [Fully open on your own computer](STACKS.md#fully-open-on-your-own-computer) | `open` | `local` | `local` or `none` | press Enter (Ollama) |
 | [Open-weight models through OpenRouter](STACKS.md#open-weight-models-through-openrouter) | `open` | `local` | `local` or `none` | `https://openrouter.ai/api/v1` |
 
-Only the [embedding](GLOSSARY.md#embedding) choice is costly to change later ([why](STACKS.md#indexes-are-tied-to-one-embedding-model)); [reranking](GLOSSARY.md#reranking) and the chat model can change any time. On a first run, "(current)" by `anthropic` is only the wizard's starting point.
+Only the [embedding](GLOSSARY.md#embedding) choice is costly to change later ([why](STACKS.md#indexes-are-tied-to-one-embedding-model)); [reranking](GLOSSARY.md#reranking) and the chat model can change any time. On a first run nothing is saved yet, so the wizard marks its own starting points "(suggested)", `anthropic` at the stack question: that's only what Enter picks, not a recommendation. On later runs, "(current)" marks what's saved in `.env`.
 
 ### What the wizard asks
 
@@ -762,7 +762,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 2. **Which stack?** Type the stack from [your row](#which-setup-to-choose). You should see something like:
    ```text
-     1. anthropic (current): Claude writes the answers; your archive lives in Postgres. ...
+     1. anthropic (suggested): Claude writes the answers; your archive lives in Postgres. ...
    ...
    Choose a number or name [anthropic]:
    ```
@@ -831,7 +831,7 @@ You see only the screens your setup needs, in this order. A bracketed value such
 
 10. **Newsroom details (used in Dewey's prompts).** Type your newsroom's name, the earliest article date in your archive, and your region (`none` for a national outlet).
 
-11. **Connect AI tools (MCP).** The wizard saves a secret [bearer token](GLOSSARY.md#bearer-token) for Dewey's [MCP server](GLOSSARY.md#mcp-server) in `.env`, without showing it; a re-run asks `Keep the existing MCP token? (Y/n)`: press Enter. Only AI tools that connect over HTTP use it ([MCP.md](MCP.md#before-you-start-http)).
+11. **Connect AI tools (MCP).** Dewey's [MCP server](GLOSSARY.md#mcp-server) needs a secret [bearer token](GLOSSARY.md#bearer-token) when AI tools connect over HTTP. On a first run the wizard makes one and says so (`This run made a new token.`), without showing it; it's saved in `.env` as `DEWEY_MCP_TOKEN` with your other answers. A re-run asks `Keep the existing MCP token? (Y/n)`: press Enter. AI tools that start Dewey themselves on this computer don't need the token; only tools that connect over HTTP do ([MCP.md](MCP.md#before-you-start-http)).
 
 12. **Summary.** Secrets show as `'********'`, and `Still missing:` lists any settings Dewey still needs. On Claude with an `ant auth login` sign-in, `Dewey could not confirm a Claude credential` usually means the sign-in looks signed out: follow the lines printed under it (most often an `ant auth login` command). The wizard carries on meanwhile ([STACKS.md](STACKS.md#claude-anthropic-api)).
 
@@ -929,10 +929,12 @@ The demo page is a small [Gradio](https://www.gradio.app/) chat page for trying 
    ```text
    Dewey: Listening on 127.0.0.1, first free port from 7860 (this computer only).
    ...
+   Dewey: Share links: off, always. The page has no login, so Dewey never makes a public link.
+   Dewey: Gradio, which serves the page, prints a tip about share=True when it starts. Ignore it.
    * Running on local URL:  http://127.0.0.1:7860
    * To create a public link, set `share=True` in `launch()`.
    ```
-   Ignore the `share=True` line: Dewey keeps public links off. Leave the window open.
+   Ignore the last line, as Dewey's own lines above it say: Dewey keeps public links off, because the page has no login. Leave the window open.
 
 2. **Open the address** on the `Running on local URL` line, usually http://127.0.0.1:7860 (7861 or higher if that port is busy).
 

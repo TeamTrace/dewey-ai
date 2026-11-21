@@ -155,7 +155,7 @@ The `DEWEY_STACK` setting in `.env`, which picks who runs the chat model and sea
 
 `open` means open-weight, not OpenAI: the `open` setups don't use OpenAI's own service.
 
-**In Dewey:** if `DEWEY_STACK` is missing, Dewey runs `azure`. The setup wizard always writes it; on a first run, `anthropic` is selected only as a starting point.
+**In Dewey:** if `DEWEY_STACK` is missing, Dewey runs `azure`. The setup wizard always writes it; on a first run its list starts at `anthropic`, marked "(suggested)", which is only what Enter picks.
 
 **More:** [STACKS.md: The setups at a glance](STACKS.md#the-setups-at-a-glance)
 

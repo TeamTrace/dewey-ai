@@ -212,8 +212,11 @@ def ask_yes(prompt: str, default: bool = True) -> bool:
             return False
 
 
-def choose(prompt: str, options, default: str, mark: str = "current") -> str:
-    """options: list of (value, description)."""
+def choose(prompt: str, options, default: str, mark: str) -> str:
+    """options: list of (value, description). `mark` says, in the list, what the Enter default is:
+    "current" for a value saved in .env, "suggested" for the wizard's own starting point,
+    "default" for what a step does when nothing is chosen. It has no default of its own, so that
+    no question can call its starting point "current" by accident."""
     say(prompt)
     for i, (value, desc) in enumerate(options, 1):
         marker = paint(f" ({mark})", GOLD) if value == default else ""
@@ -226,6 +229,17 @@ def choose(prompt: str, options, default: str, mark: str = "current") -> str:
         if raw.isdigit() and 1 <= int(raw) <= len(values):
             return values[int(raw) - 1]
         say(f"  Please enter 1-{len(values)} or one of: {', '.join(values)}")
+
+
+def saved_or_suggested(cur: dict, key: str, options, suggestion: str):
+    """(default, mark) for choose(): the value saved in .env under `key`, marked "current", when
+    it is one of the options; otherwise the wizard's own starting point, marked "suggested".
+    A first run has nothing saved, so it never shows "(current)". Dewey lower-cases these
+    settings when it reads them, so the saved value is compared the same way."""
+    saved = (cur.get(key) or "").strip().lower()
+    if saved in [value for value, _ in options]:
+        return saved, "current"
+    return suggestion, "suggested"
 
 
 def offer_link(label: str, url: str, interactive: bool = True) -> None:
@@ -588,19 +602,19 @@ def check_python(version=None, where: Optional[PythonSituation] = None) -> bool:
 
 def ask_stack(cur: dict) -> str:
     heading("1. Which stack?")
-    return choose(
-        "Dewey can run on three stacks:",
-        [
-            ("anthropic", "Claude writes the answers; your archive lives in Postgres. Needs an "
-                          "Anthropic account (paid API). Search models can be hosted (Voyage AI) "
-                          "or open source on this machine - you choose next."),
-            ("open", "Everything open source on hardware you control: a local chat model "
-                     "(via Ollama), local search models, Postgres. No accounts or API keys."),
-            ("azure", "The original setup: Azure OpenAI + Azure AI Search + Blob Storage. "
-                      "Needs an Azure subscription with those services."),
-        ],
-        default=cur.get("DEWEY_STACK") or "anthropic",
-    )
+    options = [
+        ("anthropic", "Claude writes the answers; your archive lives in Postgres. Needs an "
+                      "Anthropic account (paid API). Search models can be hosted (Voyage AI) "
+                      "or open source on this machine - you choose next."),
+        ("open", "Everything open source on hardware you control: a local chat model "
+                 "(via Ollama), local search models, Postgres. No accounts or API keys."),
+        ("azure", "The original setup: Azure OpenAI + Azure AI Search + Blob Storage. "
+                  "Needs an Azure subscription with those services."),
+    ]
+    # The starting point is only where the list begins. It is not what Dewey runs when DEWEY_STACK
+    # is missing (that is azure, in app/providers/__init__.py), and the wizard always writes it.
+    default, mark = saved_or_suggested(cur, "DEWEY_STACK", options, "anthropic")
+    return choose("Dewey can run on three stacks:", options, default, mark)
 
 
 def ask_newsroom(cur: dict) -> dict:
@@ -646,24 +660,21 @@ def ask_retrieval(stack: str, cur: dict) -> dict:
     say("separate from the chat model: you can mix them, e.g. Claude for answers with")
     say("open-source search models, which needs no Voyage account.")
     default_embed = "voyage" if stack == "anthropic" else "local"
-    embed = choose(
-        "Where should embeddings (the vectors that power semantic search) be computed?",
-        [
-            ("voyage", "Voyage AI's hosted API (voyage-4). Needs a Voyage key; billed per token."),
-            ("local", "voyage-4-nano on this machine. Open-weight (Apache 2.0), no key; "
-                      "needs PyTorch and is slower on CPU."),
-        ],
-        default=cur.get("EMBEDDING_PROVIDER") or default_embed,
-    )
-    rerank = choose(
-        "Where should results be reranked?",
-        [
-            ("voyage", "Voyage AI's hosted rerank-3. Needs a Voyage key."),
-            ("local", "bge-reranker-v2-m3 on this machine. Open-weight (Apache 2.0), no key."),
-            ("none", "Skip reranking; use the hybrid search order. Fastest, likely less precise."),
-        ],
-        default=cur.get("RERANK_PROVIDER") or default_embed,
-    )
+    embed_options = [
+        ("voyage", "Voyage AI's hosted API (voyage-4). Needs a Voyage key; billed per token."),
+        ("local", "voyage-4-nano on this machine. Open-weight (Apache 2.0), no key; "
+                  "needs PyTorch and is slower on CPU."),
+    ]
+    default, mark = saved_or_suggested(cur, "EMBEDDING_PROVIDER", embed_options, default_embed)
+    embed = choose("Where should embeddings (the vectors that power semantic search) be computed?",
+                   embed_options, default, mark)
+    rerank_options = [
+        ("voyage", "Voyage AI's hosted rerank-3. Needs a Voyage key."),
+        ("local", "bge-reranker-v2-m3 on this machine. Open-weight (Apache 2.0), no key."),
+        ("none", "Skip reranking; use the hybrid search order. Fastest, likely less precise."),
+    ]
+    default, mark = saved_or_suggested(cur, "RERANK_PROVIDER", rerank_options, default_embed)
+    rerank = choose("Where should results be reranked?", rerank_options, default, mark)
     say("Note: once you index your archive, the embedding choice is fixed for that database.")
     return {"EMBEDDING_PROVIDER": embed, "RERANK_PROVIDER": rerank}
 
@@ -2193,11 +2204,29 @@ def ask_mcp(cur: dict) -> dict:
     say("Dewey's MCP server lets agent harnesses (Hermes Agent, DeepSeek Harness, Claude Code) and")
     say("chat apps (Open WebUI, LibreChat) search your archive. Over HTTP it requires a secret token,")
     say("which is stored in .env and never printed here.")
+    # Say what this run did with the token, in the future tense for saving: nothing is written
+    # until "Write this to .env?", and nothing at all with --dry-run. The token is never printed.
     existing = cur.get("DEWEY_MCP_TOKEN", "")
-    if len(existing) >= MCP_MIN_TOKEN_CHARS and ask_yes("Keep the existing MCP token?", default=True):
-        return {"DEWEY_MCP_TOKEN": existing}
+    usable = len(existing) >= MCP_MIN_TOKEN_CHARS
+    if usable:
+        if ask_yes("Keep the existing MCP token?", default=True):
+            say("  Kept the token that is already in .env. AI tools that use it need no change.")
+            return {"DEWEY_MCP_TOKEN": existing}
+        say("  This run made a new token to replace it.")
+    elif existing:
+        say(f"  The token in .env is shorter than {MCP_MIN_TOKEN_CHARS} characters, which the MCP server refuses,")
+        say("  so this run made a new one to replace it.")
+    else:
+        say("  This run made a new token.")
+    say("  It will be saved in .env with your other answers, as DEWEY_MCP_TOKEN, and is never shown on screen.")
     if existing:
-        say("  Generating a new token: clients that used the old one will need the new value from .env.")
+        # A token the server refused never worked, so only a usable one can "stop working".
+        say("  Afterwards, restart the MCP server if it runs over HTTP, and give each AI tool that connects")
+        say("  over HTTP the new value" + (": the old one stops working" if usable else "")
+            + " (docs/MCP.md, under Security).")
+    else:
+        say("  AI tools that start Dewey themselves on this computer (stdio) do not need it. Only tools that")
+        say("  connect over HTTP do; docs/MCP.md shows how to copy it for them.")
     return {"DEWEY_MCP_TOKEN": secrets.token_urlsafe(32)}
 
 

@@ -635,5 +635,80 @@ class PublishedOnLoopbackServerTest(unittest.TestCase):
                 self.assertEqual(raw_get(self.server.port, "/config", host)[0], 400)
 
 
+class ShareTipTest(unittest.TestCase):
+    """Dewey says share links are off, and Gradio then prints a tip to turn them on (issue #19,
+    box h). Gradio's lines stay, because its "Running on local URL" line is the only place the
+    port actually used is shown; Dewey's own last two lines say to ignore the tip."""
+
+    URL_LINE = "* Running on local URL:  http://127.0.0.1:{port}"
+    TIP = "* To create a public link, set `share=True` in `launch()`."
+
+    def test_summary_ends_with_share_links_off_and_ignore_the_tip(self):
+        for env in ({}, {PROXY: "true"}, {"GRADIO_SERVER_NAME": "0.0.0.0", PUBLISHED: "true"},
+                    {"GRADIO_SERVER_PORT": "7999", "DEWEY_CONCURRENCY": "2"}):
+            with self.subTest(env=env):
+                p = plan(env)
+                self.assertTrue(p.summary[-2].startswith("Share links: off"), p.summary[-2])
+                self.assertIn("never makes a public link", p.summary[-2])
+                self.assertIn("share=True", p.summary[-1])
+                self.assertIn("Ignore it", p.summary[-1])
+                # Share links have a line of their own now; the other "off" line lists the rest.
+                self.assertEqual(sum("share links" in line.lower() for line in p.summary), 1)
+                self.assertEqual(sum("share=True" in line for line in p.summary), 1)
+                (off,) = [line for line in p.summary if line.startswith("Telemetry")]
+                self.assertEqual(off, "Telemetry, API page, /monitoring and Gradio's MCP server: off.")
+                self.assertIs(p.launch_kwargs["share"], False)
+                # Not quiet: that would hide Gradio's URL line along with its tip.
+                self.assertNotIn("quiet", p.launch_kwargs)
+
+    def test_main_prints_the_summary_in_order_so_the_note_comes_last(self):
+        # A blank newsroom name stops main() after the summary and before anything is built.
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {"NEWSROOM_NAME": " "}, clear=True), \
+                mock.patch("dotenv.load_dotenv"), \
+                mock.patch.object(main, "build_ui") as build_ui, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(main.main(), 1)
+        build_ui.assert_not_called()
+        self.assertEqual(out.getvalue().splitlines(), [f"Dewey: {line}" for line in plan({}).summary])
+        self.assertIn("Ignore it", out.getvalue().splitlines()[-1])
+
+    @unittest.skipUnless(HAVE_GRADIO, "gradio not installed")
+    def test_gradio_prints_its_address_and_the_tip_and_never_shares(self):
+        # What Dewey's note describes is another product's output, so pin it: if a Gradio upgrade
+        # changes these two lines, update the note in build_launch_plan() and the guides that
+        # quote them (README.md, docs/INSTALL.md, docs/DEPLOYMENT.md).
+        port = free_port()
+        p = main.build_launch_plan({"GRADIO_SERVER_PORT": str(port)})
+        # Checked before anything starts: with sharing on, launch() would reach for the network.
+        self.assertIs(p.launch_kwargs["share"], False)
+        self.assertEqual(p.launch_kwargs["server_name"], "127.0.0.1")
+        out = io.StringIO()
+        # GRADIO_SHARE=true turns sharing on in an app that leaves `share` unset. Dewey sets it.
+        with mock.patch.dict(os.environ, {"GRADIO_SHARE": "true"}), contextlib.redirect_stdout(out):
+            demo = main.build_ui(FakeDewey())
+            self.addCleanup(self.close, demo)
+            demo.queue(**p.queue_kwargs)
+            demo.launch(**p.launch_kwargs, prevent_thread_lock=True)
+        self.assertIs(demo.share, False)
+        self.assertIsNone(demo.share_url)
+        printed = out.getvalue()
+        # Exactly these two lines, so Dewey's note, printed just before, sits directly above them.
+        self.assertEqual(printed.splitlines(), [self.URL_LINE.format(port=port), self.TIP])
+        self.assertNotIn("public URL", printed)
+
+    def test_the_install_guide_shows_these_lines_as_they_are_printed(self):
+        guide = (main.REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+        summary = plan({}).summary
+        self.assertIn(f"   Dewey: {summary[0]}\n   ...\n", guide)
+        self.assertIn("\n".join(["   Dewey: " + summary[-2], "   Dewey: " + summary[-1],
+                                 "   " + self.URL_LINE.format(port=7860), "   " + self.TIP]) + "\n", guide)
+
+    @staticmethod
+    def close(demo):
+        with contextlib.redirect_stdout(io.StringIO()):
+            demo.close()
+
+
 if __name__ == "__main__":
     unittest.main()

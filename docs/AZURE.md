@@ -111,7 +111,7 @@ The setup wizard writes Dewey's settings to a [`.env` file](GLOSSARY.md#env-file
    python install.py
    ```
 
-2. **Choose azure.** At `1. Which stack?`, type `3` and press Enter (Enter alone picks `anthropic`). You should see something like:
+2. **Choose azure.** At `1. Which stack?`, type `3` and press Enter (on a first run, Enter alone picks `anthropic`). You should see something like:
 
    ```text
    Endpoints and keys are on each resource's 'Keys and Endpoint' / 'Access keys' page.
