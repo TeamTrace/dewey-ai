@@ -143,5 +143,19 @@ class LocalModelTests(unittest.TestCase):
             embeddings.make_embedder("local").embed(["x"], "classification")
 
 
+class VoyageClientTests(unittest.TestCase):
+    def test_hosted_clients_retry_rate_limits(self):
+        # voyageai 0.6.0 defaults to max_retries=0, so one HTTP 429 ends indexing
+        # with a traceback and fails searches. Both hosted clients must retry.
+        import voyageai
+
+        with mock.patch.object(voyageai, "Client") as client_cls:
+            embeddings.VoyageEmbedder("voyage-4")
+            embeddings.VoyageReranker("rerank-3")
+        self.assertEqual(client_cls.call_count, 2)
+        for call in client_cls.call_args_list:
+            self.assertGreaterEqual(call.kwargs.get("max_retries", 0), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

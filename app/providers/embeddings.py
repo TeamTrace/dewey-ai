@@ -28,6 +28,9 @@ from typing import List, Optional, Protocol, Sequence
 EMBED_DEFAULTS = {"voyage": "voyage-4", "local": "voyage-4-nano"}
 RERANK_DEFAULTS = {"voyage": "rerank-3", "local": "BAAI/bge-reranker-v2-m3", "none": ""}
 DEFAULT_EMBED_DIM = 1024  # supported by voyage-4 (default) and voyage-4-nano
+# voyageai 0.6.0 defaults to max_retries=0, so a single HTTP 429 aborts indexing or search.
+# Its SDK counts max_retries as the total number of attempts, so 4 gives three retries.
+VOYAGE_MAX_RETRIES = 4
 # The embedding models EMBEDDING_PROVIDER=local can run, and their Hugging Face repos. Any other
 # name (voyage-4, voyage-4-large...) is a hosted Voyage AI model, which "local" must never call.
 LOCAL_EMBED_MODELS = {"voyage-4-nano": "MongoDB/voyage-4-nano"}
@@ -60,7 +63,7 @@ class VoyageEmbedder:
 
         self.model = model
         self.dim = dim
-        self.client = client or voyageai.Client()
+        self.client = client or voyageai.Client(max_retries=VOYAGE_MAX_RETRIES)
 
     def embed(self, texts: Sequence[str], input_type: str) -> List[List[float]]:
         result = self.client.embed(
@@ -74,7 +77,7 @@ class VoyageReranker:
         import voyageai
 
         self.model = model
-        self.client = client or voyageai.Client()
+        self.client = client or voyageai.Client(max_retries=VOYAGE_MAX_RETRIES)
 
     def rank(self, query: str, documents: Sequence[str], top_k: int) -> List[int]:
         result = self.client.rerank(query, list(documents), model=self.model, top_k=top_k)
